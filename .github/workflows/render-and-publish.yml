@@ -20,10 +20,20 @@ jobs:
 
       - name: Get last GitHub Pages deployment timestamp
         run: |
-          DEPLOY_TIME_RAW=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/pages/builds" | jq -r '.[0].updated_at')
-          DEPLOY_TIME=$(date -d "$DEPLOY_TIME_RAW" +%s)
-          echo "Last deployment: $DEPLOY_TIME_RAW ($DEPLOY_TIME)"
+          RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pages/builds")
+          
+          # Check if response is an array and has elements
+          if echo "$RESPONSE" | jq -e '.[0]' > /dev/null 2>&1; then
+            DEPLOY_TIME_RAW=$(echo "$RESPONSE" | jq -r '.[0].updated_at')
+            DEPLOY_TIME=$(date -d "$DEPLOY_TIME_RAW" +%s)
+            echo "Last deployment: $DEPLOY_TIME_RAW ($DEPLOY_TIME)"
+          else
+            # No deployments yet, set to epoch (0) so all files are considered modified
+            DEPLOY_TIME=0
+            echo "No previous deployments found. Setting DEPLOY_TIME to 0 (all files will be rendered)"
+          fi
+          
           echo "DEPLOY_TIME=$DEPLOY_TIME" >> $GITHUB_ENV
 
       - name: Find modified .qmd files

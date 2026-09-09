@@ -8,3 +8,4 @@ resources/Rmarkdown-examples/*.docx
 resources/Rmarkdown-examples/E*.md
 .Rproj.user
 /.code/*.html
+/.code/*.R
