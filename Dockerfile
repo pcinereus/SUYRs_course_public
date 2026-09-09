@@ -63,7 +63,6 @@ RUN R -e "options(repos = \
   pak::pkg_install(c('gbm', 'car', 'jmgirard/standist', 'tidybayes')); \
   pak::pkg_install(c('dagitty', 'ggdag')); \
   pak::pkg_install(c('plotrix', 'PBSmapping')); \
-
 "
 
 RUN R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=TRUE)"
@@ -121,7 +120,6 @@ RUN R -e "options(repos = \
     list(CRAN = \"https://packagemanager.posit.co/cran/2024-04-11/\")); \
   pak::pkg_install(c('magick')); \
   pak::pkg_install(c('ggdag')); \
-
 "
 
 
@@ -132,20 +130,6 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu \
     fonts-noto \
     && rm -rf /var/lib/apt/lists/*
-
-# Install custom fonts
-RUN mkdir -p /usr/share/fonts/custom
-
-COPY resources/ArchitectsDaughter-Regular.ttf /usr/share/fonts/custom/ 2>/dev/null || true
-COPY resources/xkcd.ttf /usr/share/fonts/custom/ 2>/dev/null || true
-COPY resources/Hannahs_Messy_Handwriting.ttf /usr/share/fonts/custom/ 2>/dev/null || true
-COPY resources/CabinSketch-Bold.ttf /usr/share/fonts/custom/ 2>/dev/null || true
-COPY resources/Inconsolata*.ttf /usr/share/fonts/custom/ 2>/dev/null || true
-COPY "resources/Complete in Him.ttf" /usr/share/fonts/custom/ 2>/dev/null || true
-COPY resources/veteran_typewriter.ttf /usr/share/fonts/custom/ 2>/dev/null || true
-
-# Rebuild font cache
-RUN fc-cache -fv && fc-list
 
 RUN git config --global user.name "pcinereus"
 RUN git config --global user.email "i.obesulus@gmdail.com"
@@ -158,3 +142,10 @@ WORKDIR /workspace
 COPY Makefile /workspace
 COPY tut/*.qmd /workspace/tut
 COPY resources/*.* /workspace/resources
+
+# Install custom fonts (after resources are copied)
+RUN mkdir -p /usr/share/fonts/custom && \
+    find /workspace/resources -maxdepth 1 \( -name "ArchitectsDaughter-Regular.ttf" -o -name "xkcd.ttf" -o -name "Hannahs_Messy_Handwriting.ttf" -o -name "CabinSketch-Bold.ttf" -o -name "Inconsolata*.ttf" -o -name "Complete in Him.ttf" -o -name "veteran_typewriter.ttf" \) -type f -exec cp {} /usr/share/fonts/custom/ \; 2>/dev/null || true
+
+# Rebuild font cache
+RUN fc-cache -fv && fc-list
