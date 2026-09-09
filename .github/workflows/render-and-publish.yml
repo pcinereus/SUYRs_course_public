@@ -68,16 +68,19 @@ jobs:
 
       - name: Pull Existing gh-pages Branch
         run: |
-          mkdir gh-pages-folder
-          # git fetch origin gh-pages:gh-pages
-          # git checkout gh-pages
-          git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }} gh-pages-folder
-          ls -lat gh-pages-folder
+          # Try to clone the gh-pages branch; if it doesn't exist, create empty folder
+          if git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }} gh-pages-folder 2>/dev/null; then
+            echo "Successfully cloned gh-pages branch"
+            ls -lat gh-pages-folder
+          else
+            echo "gh-pages branch does not exist yet (first deployment). Creating empty folder."
+            mkdir -p gh-pages-folder
+          fi
 
           ls -lat
           echo $PWD
           mkdir -p docs
-          cp -r gh-pages-folder/*.html docs || echo "No existing files to copy."
+          cp -r gh-pages-folder/*.html docs 2>/dev/null || echo "No existing HTML files to copy."
           ls -lat docs
 
       # - name: Setup tmate session
