@@ -3,8 +3,8 @@ name: Render and publish the tutorials
 on:
   workflow_dispatch:
 #  pull_request:
-#  push:
-#    branches: ['release']
+  push:
+    branches: ['CSE2025']
 
 jobs:
   render-tutorials:
@@ -23,9 +23,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with: 
+        with:
           fetch-depth: 0  # ensure that more than the last commit is checked out so that we can get time stamps
-      # Restore the timestamps - I am going to try to use these to work out what is new and what is not    
+      # Restore the timestamps - I am going to try to use these to work out what is new and what is not
       - name: Restore Timestamps
         uses: chetan/git-restore-mtime-action@v1
 
@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev make
-          
+
       # install graphviz
       - name: Install Graphviz
         run: sudo apt-get install graphviz
@@ -61,7 +61,7 @@ jobs:
         run: |
           cat("\noptions(repos=c(stan='https://mc-stan.org/r-packages/',CRAN ='https://cloud.r-project.org'))\n", file = "~/.Rprofile", append = TRUE)
         shell: Rscript {0}
-        
+
       ## Install R packages
       - name: install R packages
         uses: r-lib/actions/setup-r-dependencies@v2
@@ -117,6 +117,22 @@ jobs:
             any::car
             any::dagitty
             any::ggdag
+            any::tidybayes
+            any::ggmcmc
+            any::rstanarm
+            any::bayesplot
+            any::rstan
+            any::broom
+            any::broom.mixed
+            any::dismo
+            any::modelsummary
+            any::caret
+            any::pdp
+            any::effects
+            any::geoR
+            any::randomForest
+            any::styler
+            any::reshape
             github::jmgirard/standist
 
       - name: Install other R packages
@@ -124,30 +140,35 @@ jobs:
           Rscript -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=TRUE)"
           Rscript -e "install.packages('RandomFields', repos = c('https://spatstat.r-universe.dev', 'https://cloud.r-project.org'))"
           Rscript -e "install.packages('RandomFieldsUtils', repos = c('https://spatstat.r-universe.dev', 'https://cloud.r-project.org'))"
-          Rscript -e "install.packages('tidybayes')"
+          Rscript -e "remotes::install_github('timcdlucas/INLAutils')"
+          Rscript -e "remotes::install_github('julianfaraway/brinla')"
 
-          Rscript -e "remotes::install_github('jmgirard/standist')"
+      - name: Cache Cmdstan installation
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-${{ hashFiles('**/DESCRIPTION') }}-v1
+          restore-keys: |
+            cmdstan-${{ runner.os }}-
 
-      - name: Install CmdStan
+      - name: Install Cmdstan
         shell: Rscript {0}
         run: |
-          cmdstanr::check_cmdstan_toolchain(fix = TRUE)
-          cmdstanr::install_cmdstan(cores = parallel::detectCores())
-          #install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
-          #cmdstanr::check_cmdstan_toolchain(fix = TRUE)
-          #cmdstanr::install_cmdstan(cores = 2)
-          #version <- "2.35.0"
-          #url <- sprintf("https://github.com/stan-dev/cmdstan/releases/download/v%s/cmdstan-%s.tar.gz", version, version)
-          #cmdstanr::install_cmdstan(cores = 2, release_url = url)        
-          #cmdstanr::check_cmdstan_toolchain(fix = TRUE)
-          #cmdstanr::install_cmdstan(cores = 2)
-          #cmdstan <- file.path(Sys.getenv("RUNNER_TEMP"), "cmdstan")
-          #file.rename(cmdstanr::cmdstan_path(), cmdstan)
-          #lines <- paste0("\nCMDSTAN=", cmdstan, "\n")
-          #cat(lines, file = "~/.Renviron", append = TRUE)
-          cmdstanr:::get_cmdstan_flags("STANCFLAGS")
-          cmdstanr::cmdstanr_example()
-          
+          if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+            remotes::install_github("stan-dev/cmdstanr")
+          }
+          if (requireNamespace("cmdstanr", quietly = TRUE)) {
+            cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+            cmdstanr::install_cmdstan(quiet = TRUE, cores = parallel::detectCores())
+            cmdstanr:::get_cmdstan_flags("STANCFLAGS")
+            cmdstanr::cmdstanr_example()
+            dat <- data.frame(y=rnorm(10), x=rnorm(10))
+            library(brms)
+            brm(y~x, dat, backend='cmdstanr')
+          } else {
+            message("Cmdstan already installed at:", cmdstanr::cmdstan_path())
+          }
+
       - name: install tinytex
         uses: r-lib/actions/setup-tinytex@v2
       - run: |
@@ -162,31 +183,31 @@ jobs:
 
       - name: Install Google Fonts
         run: |
+          ls -la
           ## The following wget can no longer be performed as google returns a html rather than a zip
           #wget -O Architects_Daughter.zip https://fonts.google.com/download?family=Architects%20Daughter
           # unzip -d architects_daughter/ Architects_Daughter.zip
           # mv architects_daughter /usr/share/fonts/
-          unzip -d architects_daughter/ resources/Architects_Daughter.zip
-          mv architects_daughter /usr/share/fonts/
+          #unzip -d architects_daughter/ resources/Architects_Daughter.zip
+          #mv architects_daughter /usr/share/fonts/
 
-          
-          #wget -O inconsolata.zip https://fonts.google.com/download?family=Inconsolata
-          unzip -d inconsolata/ resources/Inconsolata.zip
-          mv inconsolata /usr/share/fonts/
-          mv resources/Inconsolata_Nerd_Font_Regular.ttf /usr/share/fonts/
+          #unzip -d inconsolata/ resources/Inconsolata.zip
+          #mv inconsolata /usr/share/fonts/
+          #mv resources/Inconsolata_Nerd_Font_Regular.ttf /usr/share/fonts/
 
-          #wget -O noto_sans.zip https://fonts.google.com/download?family=Noto%20Sans
-          unzip -d noto_sans/ resources/Noto_Sans.zip
-          mv noto_sans /usr/share/fonts/
+          #unzip -d noto_sans/ resources/Noto_Sans.zip
+          #mv noto_sans /usr/share/fonts/
 
-          unzip -d ubuntu/ resources/Ubuntu.zip
-          mv ubuntu /usr/share/fonts/
+          #unzip -d ubuntu/ resources/Ubuntu.zip
+          #mv ubuntu /usr/share/fonts/
+          mv resources/xkcd.ttf /usr/share/fonts/
+          mv resources/Hannahs_Messy_Handwriting.ttf /usr/share/fonts/
+          mv resources/CabinSketch-Bold.ttf /usr/share/fonts/
+          mv "resources/Complete in Him.ttf" /usr/share/fonts/
+          mv "resources/veteran_typewriter.ttf" /usr/share/fonts/
 
           fc-cache -fv
           fc-list
-          ##fc-list -v | grep -i archi
-          ##fc-list -v | grep -i inconsolata
-          ##fc-list -v | grep -i noto
 
       # install quarto
       - name: Install quarto
@@ -194,7 +215,83 @@ jobs:
       - name: Change ImageMagick policy to allow pdf->png conversion.
         run: |
           sudo sed -i 's/^.*policy.*coder.*none.*PDF.*//' /etc/ImageMagick-6/policy.xml
-          
+
+      # Download previously rendered HTML files
+      #- name: Download previously rendered HTMLs
+      #  uses: actions/download-artifact@v4
+      #  with:
+      #    name: rendered-html
+      #    path: temp-html
+      #  continue-on-error: true
+
+      #- name: Restore HTML files to .code directory
+      #  run: |
+      #    if [ -d temp-html ]; then
+      #      cp temp-html/*.html .code/
+      #    else
+      #      echo "No previously rendered HTML files found. Skipping restore."
+      #    fi
+
+      - name: Restore HTML cache
+        uses: actions/cache@v4
+        with:
+          path: tmp-code
+          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
+          restore-keys: |
+            qmd-cache-
+
+      - name: Restore HTML files to .code directory
+        run: |
+          echo "Contents of the .code directory before copy"
+          ls -la .code
+          if [ -d tmp-code ]; then
+            echo "Contents of the tmp-code directory"
+            ls -la tmp-code
+            cp -p tmp-code/*.html .code/
+            echo "Contents of the .code directory after copy"
+            ls -la .code
+          else
+            echo "No previously rendered HTML files found. Skipping restore."
+          fi
+
+      # Render worksheets
+      - name: Make worksheets
+        run: |
+          mkdir ~/tmp
+          Rscript -e "Sys.setenv(STANCFLAGS = '')"
+          make -i ws_code
+
+      # Copy html over to docs folder
+      - name: Move htmls
+        run: |
+          mkdir -p docs
+          cp .code/*.html docs
+
+      - name: list the contents of .code directory
+        run: |
+          echo "Current dir: $(pwd)"
+          ls -la .code
+          ls -la
+          ## apparently gh cant create an artifact out of a directory that starts with a .
+          mkdir -p tmp-code
+          cp -p .code/*.html tmp-code/
+          ls -la tmp-code
+
+      - name: Save HTML cache if it was not previously restored
+        uses: actions/cache@v4
+        #if: steps.html-cache.outputs.cache-hit != 'true'
+        with:
+          path: tmp-code
+          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
+
+      ## Upload rendered HTML artifacts
+      #- name: Upload rendered HTMLs
+      #  if: always()
+      #  uses: actions/upload-artifact@v4
+      #  with:
+      #    name: rendered-html
+      #    path: tmp-code
+
       # configure git
       - name: Configure git
         run: |
@@ -202,55 +299,6 @@ jobs:
           git config --global user.email "i.obesulus@gmail.com"
           git config --global init.defaultBranch main
 
-      # Checkout the gh-pages branch into the tut folder    
-      # - name: Retrieve previous compiled pages
-      #   uses: actions/checkout@v4
-      #   with:
-      #     path: tut  # Specify the target folder for checkout
-      #     ref: gh-pages  
-          
-      - name: Touch those files that have changed since the last commit
-        run: |
-          git diff --name-only HEAD HEAD~1 | xargs touch
-        
-      # - name: Check that the docs folder is there and populated
-      #   run: | 
-      #     ls -la
-      #     ls -la docs
-      #     ls -la tut
-
-
-      # Download artifacts
-      #- name: download artifacts
-      #  uses: actions/download-artifact@v4
-      #  with: 
-      #    name: artifact
-      #    github-token: ${{ secrets.GH_PAT }} # token with actions:read permissions on target repo
-      #    path: data
-      #    run-id: 8493870822
-      #- name: Display structure of downloaded files
-      #  run: ls -R data
-  
-      # render tutorials
-      - name: Make tutorials
-        run: |
-          mkdir ~/tmp
-          echo "library(quarto); quarto_render(\"tut/index.qmd\")" | R --no-save --no-restore;
-          make -i tut
-          make -i pres
-        #run: |
-        #  echo "library(quarto); quarto_render(\"tut/index.qmd\")" | R --no-save --no-restore;
-        #  echo "library(quarto); quarto_render(\"tut/10_git.qmd\")" | R --no-save --no-restore;
-
-      # upload artifacts  
-      #- name: upload artifacts
-      #  uses: actions/upload-artifact@v4
-      #  with: 
-      #    name: artifact
-      #    path: data/reef_data_synthetic_*.csv
-      #    if-no-files-found: ignore
-      #    overwrite: true
-        
       # Deploy site to gh-pages branch
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@4.1.4
