@@ -1,8 +1,9 @@
 FROM rocker/r-ver:4.5.0
 
-# Install system dependencies
+# Install system dependencies and R development tools
 RUN apt-get update \
     && apt-get install -y \
+    build-essential \
     curl \
     gdebi-core \
     libcurl4-openssl-dev \
@@ -11,7 +12,6 @@ RUN apt-get update \
     make \
     graphviz \
     fontconfig \
-    build-essential \
     pkg-config \
     libjpeg-dev \
     libpng-dev \
@@ -26,7 +26,9 @@ RUN apt-get update \
     pandoc \
     imagemagick \
     libmagick++-dev \
-    git && \
+    git \
+    r-base-dev \
+    r-cran-rcpp && \
     rm -rf /var/lib/apt/lists/*
 
 ## Must set this environment variable to avoid issues with the magick package when trying to use it in R.
@@ -37,11 +39,13 @@ RUN sed -i 's/^.*policy.*coder.*none.*PDF.*//' /etc/ImageMagick-6/policy.xml 2>/
 
 # Install R packages
 RUN R -e "options(repos = \
-    list(CRAN = \"https://packagemanager.posit.co/cran/2024-01-10/\")); \
+    list(CRAN = \"https://cloud.r-project.org/\")); \
+  options(Ncpus = 4); \
   install.packages(\"pak\"); \
 "
 RUN R -e "options(repos = \
-    list(CRAN = \"https://packagemanager.posit.co/cran/2024-01-10/\")); \
+    list(CRAN = \"https://cloud.r-project.org/\")); \
+  options(Ncpus = 4); \
   pak::pkg_install(c('rmarkdown', 'quarto', 'tidyverse', 'ggplot2', 'sf', 'dplyr')); \
   pak::pkg_install(c('stan-dev/cmdstanr')); \
 "
@@ -52,7 +56,8 @@ RUN R -e "cmdstanr::check_cmdstan_toolchain(fix = TRUE); \
 "
 
 RUN R -e "options(repos = \
-    list(CRAN = \"https://packagemanager.posit.co/cran/2024-01-10/\")); \
+    list(CRAN = \"https://cloud.r-project.org/\")); \
+  options(Ncpus = 4); \
   pak::pkg_install(c('magick', 'pdftools', 'GGally', 'PBSmapping')); \
   pak::pkg_install(c('gmodels', 'mvtnorm', 'coda', 'gganimate', 'gridExtra')); \
   pak::pkg_install(c('ggfortify', 'DHARMa', 'glmmTMB', 'performance', 'see')); \
@@ -107,7 +112,8 @@ RUN curl -o quarto-linux-amd64.deb -L https://github.com/quarto-dev/quarto-cli/r
 RUN gdebi --non-interactive quarto-linux-amd64.deb
 
 RUN R -e "options(repos = \
-    list(CRAN = \"https://packagemanager.posit.co/cran/2021-02-10/\")); \
+    list(CRAN = \"https://cloud.r-project.org/\")); \
+  options(Ncpus = 4); \
   pak::pkg_install(c('pander', 'mvabund')); \
 "
 # Install Docker
@@ -117,7 +123,8 @@ RUN apt-get update && apt-get install -y \
 
 
 RUN R -e "options(repos = \
-    list(CRAN = \"https://packagemanager.posit.co/cran/2024-04-11/\")); \
+    list(CRAN = \"https://cloud.r-project.org/\")); \
+  options(Ncpus = 4); \
   pak::pkg_install(c('magick')); \
   pak::pkg_install(c('ggdag')); \
 "
