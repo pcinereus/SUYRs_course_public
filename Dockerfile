@@ -10,7 +10,6 @@ RUN apt-get update \
     libxml2-dev \
     make \
     graphviz \
-    unzip \
     fontconfig \
     build-essential \
     pkg-config \
@@ -127,39 +126,25 @@ RUN R -e "options(repos = \
 
 
 
-# RUN unzip -d architects_daughter/ resources/Architects_Daughter.zip
-# COPY architects_daughter /usr/share/fonts/
-# RUN unzip -d inconsolata/ resources/Inconsolata.zip
+# Install common fonts from Ubuntu repositories
+RUN apt-get update && apt-get install -y \
+    fonts-liberation \
+    fonts-dejavu \
+    fonts-noto \
+    && rm -rf /var/lib/apt/lists/*
 
-# COPY inconsolata /usr/share/fonts/
-# COPY resources/Inconsolata_Nerd_Font_Regular.ttf /usr/share/fonts/
+# Install custom fonts
+RUN mkdir -p /usr/share/fonts/custom
 
-# RUN unzip -d noto_sans/ resources/Noto_Sans.zip
-# COPY noto_sans /usr/share/fonts/
+COPY resources/ArchitectsDaughter-Regular.ttf /usr/share/fonts/custom/ 2>/dev/null || true
+COPY resources/xkcd.ttf /usr/share/fonts/custom/ 2>/dev/null || true
+COPY resources/Hannahs_Messy_Handwriting.ttf /usr/share/fonts/custom/ 2>/dev/null || true
+COPY resources/CabinSketch-Bold.ttf /usr/share/fonts/custom/ 2>/dev/null || true
+COPY resources/Inconsolata*.ttf /usr/share/fonts/custom/ 2>/dev/null || true
+COPY "resources/Complete in Him.ttf" /usr/share/fonts/custom/ 2>/dev/null || true
+COPY resources/veteran_typewriter.ttf /usr/share/fonts/custom/ 2>/dev/null || true
 
-RUN mkdir -p /usr/share/fonts
-
-COPY resources/Architects_Daughter.zip /tmp/Architects_Daughter.zip
-RUN unzip /tmp/Architects_Daughter.zip -d /usr/share/fonts
-
-COPY resources/Inconsolata_Nerd_Font_Regular.ttf /usr/share/fonts
-# RUN unzip /tmp/Inconsolata.zip -d /usr/share/fonts
-
-COPY resources/Inconsolata.zip /tmp/Inconsolata.zip
-RUN mkdir -p /usr/share/fonts/Inconsolata && \
-  unzip /tmp/Inconsolata.zip -d /usr/share/fonts/Inconsolata
-
-COPY resources/Noto_Sans.zip /tmp/Noto-Sans.zip
-RUN mkdir -p /usr/share/fonts/Noto-Sans &&\
-  unzip /tmp/Noto-Sans.zip -d /usr/share/fonts/Noto-Sans
-
-COPY resources/Ubuntu.zip /tmp/Ubuntu.zip
-RUN mkdir -p /usr/share/fonts/ubuntu && \
-  unzip /tmp/Ubuntu.zip -d /usr/share/fonts/ubuntu
-
-RUN mkdir -p /usr/share/fonts/Complete-in-Him
-COPY ["resources/Complete in Him.ttf", "/usr/share/fonts/Complete-in-Him/Complete in Him.ttf"]
-
+# Rebuild font cache
 RUN fc-cache -fv && fc-list
 
 RUN git config --global user.name "pcinereus"
