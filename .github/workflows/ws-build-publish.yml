@@ -2,297 +2,105 @@ name: Render and publish the tutorials
 
 on:
   workflow_dispatch:
-#  pull_request:
   push:
     branches: ['CSE2025']
+    paths:
+      - 'tut/**'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   render-tutorials:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-
-    name: ${{ matrix.config.r }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-        - { r: '4.5.0' }
+    permissions:
+      packages: read
+      contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # ensure that more than the last commit is checked out so that we can get time stamps
-      # Restore the timestamps - I am going to try to use these to work out what is new and what is not
-      - name: Restore Timestamps
-        uses: chetan/git-restore-mtime-action@v1
+          fetch-depth: 0
 
-      # Install system dependencies
-      - name: Install system dependencies
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Pull Docker image
+        run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Get last GitHub Pages deployment timestamp
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev make
-
-      # install graphviz
-      - name: Install Graphviz
-        run: sudo apt-get install graphviz
-
-      # Install ImageMagick
-      - name: Install imagemagick
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick libmagick++-dev
-
-      # install R
-      - uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ matrix.config.R }}
-
-      - name: Repos
-        run: |
-          cat("\noptions(repos=c(stan='https://mc-stan.org/r-packages/',CRAN ='https://cloud.r-project.org'))\n", file = "~/.Rprofile", append = TRUE)
-        shell: Rscript {0}
-
-      ## Install R packages
-      - name: install R packages
-        uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          cache-version: 2
-          packages: |
-            any::rmarkdown
-            any::magick
-            any::pdftools
-            any::quarto
-            any::tidyverse
-            any::mvabund
-            any::pander
-            any::GGally
-            any::plotrix
-            any::PBSmapping
-            any::gmodels
-            any::mvtnorm
-            any::coda
-            any::gganimate
-            any::gridExtra
-            any::ggfortify
-            any::DHARMa
-            any::glmmTMB
-            any::performance
-            any::see
-            stan-dev/cmdstanr
-            any::brms
-            any::knitr
-            any::simstudy
-            any::sf
-            any::stars
-            any::gstat
-            any::patchwork
-            any::remotes
-            any::inlabru
-            any::Hmisc
-            any::igraph
-            any::ggraph
-            any::easystats
-            any::gridGraphics
-            any::HDInterval
-            any::bayestestR
-            any::emmeans
-            any::gert
-            any::usethis
-            any::mgcv
-            any::ggeffects
-            any::mgcv
-            any::gratia
-            any::tree
-            any::gbm
-            any::car
-            any::dagitty
-            any::ggdag
-            any::tidybayes
-            any::ggmcmc
-            any::rstanarm
-            any::bayesplot
-            any::rstan
-            any::broom
-            any::broom.mixed
-            any::dismo
-            any::modelsummary
-            any::caret
-            any::pdp
-            any::effects
-            any::geoR
-            any::randomForest
-            any::styler
-            any::reshape
-            github::jmgirard/standist
-
-      - name: Install other R packages
-        run: |
-          Rscript -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=TRUE)"
-          Rscript -e "install.packages('RandomFields', repos = c('https://spatstat.r-universe.dev', 'https://cloud.r-project.org'))"
-          Rscript -e "install.packages('RandomFieldsUtils', repos = c('https://spatstat.r-universe.dev', 'https://cloud.r-project.org'))"
-          Rscript -e "remotes::install_github('timcdlucas/INLAutils')"
-          Rscript -e "remotes::install_github('julianfaraway/brinla')"
-
-      - name: Cache Cmdstan installation
-        uses: actions/cache@v4
-        with:
-          path: ~/.cmdstan
-          key: cmdstan-${{ runner.os }}-${{ hashFiles('**/DESCRIPTION') }}-v1
-          restore-keys: |
-            cmdstan-${{ runner.os }}-
-
-      - name: Install Cmdstan
-        shell: Rscript {0}
-        run: |
-          if (!requireNamespace("cmdstanr", quietly = TRUE)) {
-            remotes::install_github("stan-dev/cmdstanr")
-          }
-          if (requireNamespace("cmdstanr", quietly = TRUE)) {
-            cmdstanr::check_cmdstan_toolchain(fix = TRUE)
-            cmdstanr::install_cmdstan(quiet = TRUE, cores = parallel::detectCores())
-            cmdstanr:::get_cmdstan_flags("STANCFLAGS")
-            cmdstanr::cmdstanr_example()
-            dat <- data.frame(y=rnorm(10), x=rnorm(10))
-            library(brms)
-            brm(y~x, dat, backend='cmdstanr')
-          } else {
-            message("Cmdstan already installed at:", cmdstanr::cmdstan_path())
-          }
-
-      - name: install tinytex
-        uses: r-lib/actions/setup-tinytex@v2
-      - run: |
-          tlmgr --version
-          tlmgr update --self
-
-      - name: Install additional LaTeX packages
-        run: |
-          tlmgr install titlesec
-          tlmgr install forest
-          tlmgr list --only-installed
-
-      - name: Install Google Fonts
-        run: |
-          ls -la
-          ## The following wget can no longer be performed as google returns a html rather than a zip
-          #wget -O Architects_Daughter.zip https://fonts.google.com/download?family=Architects%20Daughter
-          # unzip -d architects_daughter/ Architects_Daughter.zip
-          # mv architects_daughter /usr/share/fonts/
-          #unzip -d architects_daughter/ resources/Architects_Daughter.zip
-          #mv architects_daughter /usr/share/fonts/
-
-          #unzip -d inconsolata/ resources/Inconsolata.zip
-          #mv inconsolata /usr/share/fonts/
-          #mv resources/Inconsolata_Nerd_Font_Regular.ttf /usr/share/fonts/
-
-          #unzip -d noto_sans/ resources/Noto_Sans.zip
-          #mv noto_sans /usr/share/fonts/
-
-          #unzip -d ubuntu/ resources/Ubuntu.zip
-          #mv ubuntu /usr/share/fonts/
-          mv resources/xkcd.ttf /usr/share/fonts/
-          mv resources/Hannahs_Messy_Handwriting.ttf /usr/share/fonts/
-          mv resources/CabinSketch-Bold.ttf /usr/share/fonts/
-          mv "resources/Complete in Him.ttf" /usr/share/fonts/
-          mv "resources/veteran_typewriter.ttf" /usr/share/fonts/
-
-          fc-cache -fv
-          fc-list
-
-      # install quarto
-      - name: Install quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-      - name: Change ImageMagick policy to allow pdf->png conversion.
-        run: |
-          sudo sed -i 's/^.*policy.*coder.*none.*PDF.*//' /etc/ImageMagick-6/policy.xml
-
-      # Download previously rendered HTML files
-      #- name: Download previously rendered HTMLs
-      #  uses: actions/download-artifact@v4
-      #  with:
-      #    name: rendered-html
-      #    path: temp-html
-      #  continue-on-error: true
-
-      #- name: Restore HTML files to .code directory
-      #  run: |
-      #    if [ -d temp-html ]; then
-      #      cp temp-html/*.html .code/
-      #    else
-      #      echo "No previously rendered HTML files found. Skipping restore."
-      #    fi
-
-      - name: Restore HTML cache
-        uses: actions/cache@v4
-        with:
-          path: tmp-code
-          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
-          restore-keys: |
-            qmd-cache-
-
-      - name: Restore HTML files to .code directory
-        run: |
-          echo "Contents of the .code directory before copy"
-          ls -la .code
-          if [ -d tmp-code ]; then
-            echo "Contents of the tmp-code directory"
-            ls -la tmp-code
-            cp -p tmp-code/*.html .code/
-            echo "Contents of the .code directory after copy"
-            ls -la .code
+          RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/pages/builds")
+          
+          # Check if response is an array and has elements
+          if echo "$RESPONSE" | jq -e '.[0]' > /dev/null 2>&1; then
+            DEPLOY_TIME_RAW=$(echo "$RESPONSE" | jq -r '.[0].updated_at')
+            DEPLOY_TIME=$(date -d "$DEPLOY_TIME_RAW" +%s)
+            echo "Last deployment: $DEPLOY_TIME_RAW ($DEPLOY_TIME)"
           else
-            echo "No previously rendered HTML files found. Skipping restore."
+            # No deployments yet, set to epoch (0) so all files are considered modified
+            DEPLOY_TIME=0
+            echo "No previous deployments found. Setting DEPLOY_TIME to 0 (all files will be rendered)"
+          fi
+          
+          echo "DEPLOY_TIME=$DEPLOY_TIME" >> $GITHUB_ENV
+
+      - name: Find modified .qmd files
+        run: |
+          git ls-tree -r --name-only origin/CSE2025 | grep 'tut/.*\.qmd$' | while read file; do
+            MODIFIED_TIME_RAW=$(git log -1 --format="%ci" -- "$file")
+            MODIFIED_TIME=$(date -d "$MODIFIED_TIME_RAW" +%s)
+            echo "File: $file | Modified: $MODIFIED_TIME_RAW ($MODIFIED_TIME)"
+            if [[ "$MODIFIED_TIME" > "$DEPLOY_TIME" ]]; then
+              echo "$file was modified after last deployment."
+              echo "$file" >> changed_files.txt
+            fi
+          done
+
+          echo "Changed files:"
+          cat changed_files.txt || echo "No changes found."
+
+      - name: Pull Existing gh-pages Branch
+        run: |
+          # Try to clone the gh-pages branch; if it doesn't exist, create empty folder
+          if git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }} gh-pages-folder 2>/dev/null; then
+            echo "Successfully cloned gh-pages branch"
+            ls -lat gh-pages-folder
+          else
+            echo "gh-pages branch does not exist yet (first deployment). Creating empty folder."
+            mkdir -p gh-pages-folder
           fi
 
-      # Render worksheets
-      - name: Make worksheets
-        run: |
-          mkdir ~/tmp
-          Rscript -e "Sys.setenv(STANCFLAGS = '')"
-          make -i ws_code
-
-      # Copy html over to docs folder
-      - name: Move htmls
-        run: |
           mkdir -p docs
-          cp .code/*.html docs
+          cp -r gh-pages-folder/*.html docs 2>/dev/null || echo "No existing HTML files to copy."
 
-      - name: list the contents of .code directory
+      - name: Render Updated Quarto Files
         run: |
-          echo "Current dir: $(pwd)"
-          ls -la .code
-          ls -la
-          ## apparently gh cant create an artifact out of a directory that starts with a .
-          mkdir -p tmp-code
-          cp -p .code/*.html tmp-code/
-          ls -la tmp-code
+          if [ -s changed_files.txt ]; then
+            echo "Files to render:"
+            cat changed_files.txt
+            
+            docker run --rm \
+              -v ${{ github.workspace }}:/workspace \
+              -w /workspace \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+              bash -c "cat changed_files.txt | xargs -I {} quarto render {}"
+            
+            # Copy rendered files to docs folder
+            cp tut/*.html docs/ 2>/dev/null || echo "No HTML files to copy."
+          else
+            echo "No updated files to render."
+          fi
 
-      - name: Save HTML cache if it was not previously restored
-        uses: actions/cache@v4
-        #if: steps.html-cache.outputs.cache-hit != 'true'
-        with:
-          path: tmp-code
-          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
-
-      ## Upload rendered HTML artifacts
-      #- name: Upload rendered HTMLs
-      #  if: always()
-      #  uses: actions/upload-artifact@v4
-      #  with:
-      #    name: rendered-html
-      #    path: tmp-code
-
-      # configure git
       - name: Configure git
         run: |
           git config --global user.name "pcinereus"
           git config --global user.email "i.obesulus@gmail.com"
           git config --global init.defaultBranch main
 
-      # Deploy site to gh-pages branch
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@4.1.4
         with:

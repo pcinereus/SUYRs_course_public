@@ -1,8 +1,7 @@
-FROM rocker/r-ver:4.3.3
+FROM rocker/r-ver:4.5.0
 
 # Install system dependencies
 RUN apt-get update \
-    # && apt-get install -y --no-install-recommends \
     && apt-get install -y \
     curl \
     gdebi-core \
@@ -23,29 +22,19 @@ RUN apt-get update \
     libheif-dev \
     wget \
     ghostscript \
-    build-essential \
     ca-certificates \
     tree \
-    pandoc && \
+    pandoc \
+    imagemagick \
+    libmagick++-dev \
+    git && \
     rm -rf /var/lib/apt/lists/*
 
-## Must set this environment variable to avoid issues with the magick package when trying to use it in R. The magick package relies on the ImageMagick library, which is installed in /usr/local/bin, but this directory is not in the default PATH. By adding it to the PATH, we ensure that the magick package can find the ImageMagick library and work properly.
+## Must set this environment variable to avoid issues with the magick package when trying to use it in R.
 ENV PATH="${PATH}:/root/bin"
 
-## It seems it is necessary to install ImageMagick from source to get the latest version that is compatible with the magick R package. The version available in the apt repositories is too old and causes errors when trying to use the magick package.
-RUN wget https://download.imagemagick.org/ImageMagick/download/ImageMagick.tar.gz
-RUN tar xvzf ImageMagick.tar.gz
-RUN cd ImageMagick-* && ./configure --with-security-policy=open && make -j$(nproc) && make install
-RUN ldconfig /usr/local/lib
-RUN magick -list policy
-RUN ls /etc
-# RUN sed -i 's/^.*policy.*coder.*none.*PDF.*//' /etc/ImageMagick-7/policy.xml
-# RUN sed -i 's/^.*policy.*coder.*none.*PDF.*//' /usr/local/etc/ImageMagick-7/policy.xml
-# RUN sed -i 's/<policy domain="coder" rights="none" pattern="PDF" \/>/<policy domain="coder" rights="read|write" pattern="PDF" \/>/' \
-RUN sed -i 's/^.*policy.*coder.*none.*PDF.*//' \
-    /usr/local/etc/ImageMagick-7/policy.xml
-# RUN apt-get install imagemagick
-# RUN ls /etc
+## Update ImageMagick policy to allow PDF operations
+RUN sed -i 's/^.*policy.*coder.*none.*PDF.*//' /etc/ImageMagick-6/policy.xml 2>/dev/null || true
 
 # Install R packages
 RUN R -e "options(repos = \
