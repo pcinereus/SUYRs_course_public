@@ -19,6 +19,7 @@ RUN apt-get update \
     libgif-dev \
     libwebp-dev \
     libheif-dev \
+    libuv1-dev \
     wget \
     ghostscript \
     ca-certificates \
@@ -37,14 +38,14 @@ ENV PATH="${PATH}:/root/bin"
 ## Update ImageMagick policy to allow PDF operations
 RUN sed -i 's/^.*policy.*coder.*none.*PDF.*//' /etc/ImageMagick-6/policy.xml 2>/dev/null || true
 
-# Install R packages
+# Install R packages (pinned to September 2026 snapshot for reproducibility)
 RUN R -e "options(repos = \
-    list(CRAN = \"https://cloud.r-project.org/\")); \
+    list(CRAN = \"https://packagemanager.posit.co/cran/2026-09-01\")); \
   options(Ncpus = 4); \
   install.packages(\"pak\"); \
 "
 RUN R -e "options(repos = \
-    list(CRAN = \"https://cloud.r-project.org/\")); \
+    list(CRAN = \"https://packagemanager.posit.co/cran/2026-09-01\")); \
   options(Ncpus = 4); \
   pak::pkg_install(c('rmarkdown', 'quarto', 'tidyverse', 'ggplot2', 'sf', 'dplyr')); \
   pak::pkg_install(c('stan-dev/cmdstanr')); \
@@ -56,7 +57,7 @@ RUN R -e "cmdstanr::check_cmdstan_toolchain(fix = TRUE); \
 "
 
 RUN R -e "options(repos = \
-    list(CRAN = \"https://cloud.r-project.org/\")); \
+    list(CRAN = \"https://packagemanager.posit.co/cran/2026-09-01\")); \
   options(Ncpus = 4); \
   pak::pkg_install(c('magick', 'pdftools', 'GGally', 'PBSmapping')); \
   pak::pkg_install(c('gmodels', 'mvtnorm', 'coda', 'gganimate', 'gridExtra')); \
@@ -112,7 +113,7 @@ RUN curl -o quarto-linux-amd64.deb -L https://github.com/quarto-dev/quarto-cli/r
 RUN gdebi --non-interactive quarto-linux-amd64.deb
 
 RUN R -e "options(repos = \
-    list(CRAN = \"https://cloud.r-project.org/\")); \
+    list(CRAN = \"https://packagemanager.posit.co/cran/2026-09-01\")); \
   options(Ncpus = 4); \
   pak::pkg_install(c('pander', 'mvabund')); \
 "
@@ -123,7 +124,7 @@ RUN apt-get update && apt-get install -y \
 
 
 RUN R -e "options(repos = \
-    list(CRAN = \"https://cloud.r-project.org/\")); \
+    list(CRAN = \"https://packagemanager.posit.co/cran/2026-09-01\")); \
   options(Ncpus = 4); \
   pak::pkg_install(c('magick')); \
   pak::pkg_install(c('ggdag')); \
