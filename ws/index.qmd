@@ -1,0 +1,71 @@
+
+---
+title: SUYRs worksheets 
+author: "Murray Logan"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+format: 
+  html:
+    ## Format
+    theme: [default, ../resources/ws-style.scss]
+    css: ../resources/ws_style.css
+    html-math-method: mathjax
+    ## Table of contents
+    toc: true
+    toc-float: true
+    ## Numbering
+    number-sections: true
+    number-depth: 3
+    ## Layout
+    page-layout: full
+    fig-caption-location: "bottom"
+    fig-align: "center"
+    fig-width: 4
+    fig-height: 4
+    fig-dpi: 72
+    tbl-cap-location: top
+    ## Code
+    code-fold: false
+    code-tools: true
+    code-summary: "Show the code"
+    code-line-numbers: true
+    code-block-border-left: "#ccc"
+    code-copy: true
+    highlight-style: atom-one
+    ## Execution
+    execute:
+      echo: true
+      cache: true
+    ## Rendering
+    embed-resources: true
+crossref:
+  fig-title: '**Figure**'
+  fig-labels: arabic
+  tbl-title: '**Table**'
+  tbl-labels: arabic
+engine: knitr
+bibliography: ../resources/references.bib
+---
+
+## Bayesian GLM
+
+- [Simple GLM (bglm_example1.html)](bglm_example1.html)
+- [Logistic GLM (bglm_example2.html)](bglm_example2.html)
+- [GLM (bglm_example3.html)](bglm_example3.html)
+- [Multiple regression  GLM (bglm_example4.html)](bglm_example4.html)
+- [Poisson GLM single categorical predictor (bglm_example5.html)](bglm_example5.html)
+- [Negative binomial GLM two categorical predictors (bglm_example6.html)](bglm_example6.html)
+- [Gamma GLM with autocorrelation (bglm_example7.html)](bglm_example7.html)
+- [Causation and DAGs (bglm_example8.html)](bglm_example8.html)
+
+
+## Hierarchical Bayesian GLM
+
+- [Simple Hierarchical GLM (bglmm_example1.html)](bglmm_example1.html)
+- [Hierarchical GLM (bglmm_example2.html)](bglmm_example2.html)
+- [Hierarchical GLM (bglmm_example3.html)](bglmm_example3.html)
+- [Hierarchical logistic GLM (bglmm_example4.html)](bglmm_example4.html)
+- [Hierarchical zero-inflated poisson GLM (bglmm_example5.html)](bglmm_example5.html)
+- [Hierarchical Poisson GLM with offset for density (bglmm_example6.html)](bglmm_example6.html)
+- [Hierarchical Gamma GLM with polynomials (bglmm_example7.html)](bglmm_example7.html)
+- [Hierarchical Ordinal GLM (bglmm_example9.html)](bglmm_example9.html)
+- [Hierarchical Binomial GLM (bglmm_example10.html)](bglmm_example10.html)
