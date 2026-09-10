@@ -40,7 +40,7 @@ jobs:
           restore-keys: |
             qmd-cache-
 
-       - name: Restore HTML files to .code directory
+      - name: Restore HTML files to .code directory
         run: |
           echo "Contents of the .code directory before copy"
           ls -la .code
