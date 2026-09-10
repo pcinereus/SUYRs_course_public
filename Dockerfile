@@ -69,6 +69,9 @@ RUN R -e "options(repos = \
   pak::pkg_install(c('gbm', 'car', 'jmgirard/standist', 'tidybayes')); \
   pak::pkg_install(c('dagitty', 'ggdag')); \
   pak::pkg_install(c('plotrix', 'PBSmapping')); \
+  pak::pkg_install(c('bayesplot', 'ggmcmc', 'rstan', 'posterior')); \
+  pak::pkg_install(c('broom', 'broom.mixed', 'modelsummary', 'marginaleffects')); \
+  pak::pkg_install(c('tinytable', 'vegan', 'ggvegan', 'pdp', 'randomforest')); \
 "
 
 RUN R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=TRUE)"
@@ -128,6 +131,8 @@ RUN R -e "options(repos = \
   options(Ncpus = 4); \
   pak::pkg_install(c('magick')); \
   pak::pkg_install(c('ggdag')); \
+  pak::pkg_install(c('rstanarm')); \
+  pak::pkg_install(c('INLAutils')); \
 "
 
 
