@@ -148,7 +148,7 @@ RUN git config --global init.defaultBranch main
 WORKDIR /workspace
 #
 COPY Makefile /workspace
-COPY tut/*.qmd /workspace/tut
+# COPY tut/*.qmd /workspace/tut
 COPY resources/*.* /workspace/resources
 
 # Install custom fonts (after resources are copied)
