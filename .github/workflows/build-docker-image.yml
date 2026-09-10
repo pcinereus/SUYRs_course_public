@@ -7,8 +7,6 @@ on:
     paths:
       - 'Dockerfile'
       - 'resources/**'
-      - 'tut/**'
-      - '.github/workflows/build-docker-image.yml'
 
 env:
   REGISTRY: ghcr.io
