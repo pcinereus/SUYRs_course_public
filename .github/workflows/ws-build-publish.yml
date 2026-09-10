@@ -3,9 +3,9 @@ name: Render and publish the tutorials
 on:
   workflow_dispatch:
   push:
-    branches: ['CSE2025']
+    branches: ['main']
     paths:
-      - 'tut/**'
+      - 'ws/**'
 
 env:
   REGISTRY: ghcr.io
@@ -36,7 +36,7 @@ jobs:
         run: |
           RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/pages/builds")
-          
+
           # Check if response is an array and has elements
           if echo "$RESPONSE" | jq -e '.[0]' > /dev/null 2>&1; then
             DEPLOY_TIME_RAW=$(echo "$RESPONSE" | jq -r '.[0].updated_at')
@@ -47,12 +47,12 @@ jobs:
             DEPLOY_TIME=0
             echo "No previous deployments found. Setting DEPLOY_TIME to 0 (all files will be rendered)"
           fi
-          
+
           echo "DEPLOY_TIME=$DEPLOY_TIME" >> $GITHUB_ENV
 
       - name: Find modified .qmd files
         run: |
-          git ls-tree -r --name-only origin/CSE2025 | grep 'tut/.*\.qmd$' | while read file; do
+          git ls-tree -r --name-only origin/main | grep 'tut/.*\.qmd$' | while read file; do
             MODIFIED_TIME_RAW=$(git log -1 --format="%ci" -- "$file")
             MODIFIED_TIME=$(date -d "$MODIFIED_TIME_RAW" +%s)
             echo "File: $file | Modified: $MODIFIED_TIME_RAW ($MODIFIED_TIME)"
@@ -84,13 +84,13 @@ jobs:
           if [ -s changed_files.txt ]; then
             echo "Files to render:"
             cat changed_files.txt
-            
+
             docker run --rm \
               -v ${{ github.workspace }}:/workspace \
               -w /workspace \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
               bash -c "cat changed_files.txt | xargs -I {} quarto render {}"
-            
+
             # Copy rendered files to docs folder
             cp tut/*.html docs/ 2>/dev/null || echo "No HTML files to copy."
           else
