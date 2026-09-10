@@ -11,7 +11,7 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  render-tutorials:
+  render-worksheets:
     runs-on: ubuntu-latest
     permissions:
       packages: read
@@ -32,70 +32,122 @@ jobs:
       - name: Pull Docker image
         run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Get last GitHub Pages deployment timestamp
-        run: |
-          RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/pages/builds")
+      - name: Restore HTML cache
+        uses: actions/cache@v4
+        with:
+          path: tmp-code
+          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
+          restore-keys: |
+            qmd-cache-
 
-          # Check if response is an array and has elements
-          if echo "$RESPONSE" | jq -e '.[0]' > /dev/null 2>&1; then
-            DEPLOY_TIME_RAW=$(echo "$RESPONSE" | jq -r '.[0].updated_at')
-            DEPLOY_TIME=$(date -d "$DEPLOY_TIME_RAW" +%s)
-            echo "Last deployment: $DEPLOY_TIME_RAW ($DEPLOY_TIME)"
+       - name: Restore HTML files to .code directory
+        run: |
+          echo "Contents of the .code directory before copy"
+          ls -la .code
+          if [ -d tmp-code ]; then
+            echo "Contents of the tmp-code directory"
+            ls -la tmp-code
+            cp -p tmp-code/*.html .code/
+            echo "Contents of the .code directory after copy"
+            ls -la .code
           else
-            # No deployments yet, set to epoch (0) so all files are considered modified
-            DEPLOY_TIME=0
-            echo "No previous deployments found. Setting DEPLOY_TIME to 0 (all files will be rendered)"
+            echo "No previously rendered HTML files found. Skipping restore."
           fi
 
-          echo "DEPLOY_TIME=$DEPLOY_TIME" >> $GITHUB_ENV
-
-      - name: Find modified .qmd files
+      # Render worksheets
+      - name: Make worksheets
         run: |
-          git ls-tree -r --name-only origin/main | grep 'tut/.*\.qmd$' | while read file; do
-            MODIFIED_TIME_RAW=$(git log -1 --format="%ci" -- "$file")
-            MODIFIED_TIME=$(date -d "$MODIFIED_TIME_RAW" +%s)
-            echo "File: $file | Modified: $MODIFIED_TIME_RAW ($MODIFIED_TIME)"
-            if [[ "$MODIFIED_TIME" > "$DEPLOY_TIME" ]]; then
-              echo "$file was modified after last deployment."
-              echo "$file" >> changed_files.txt
-            fi
-          done
+          mkdir ~/tmp
+          Rscript -e "Sys.setenv(STANCFLAGS = '')"
+          make -i ws_code
 
-          echo "Changed files:"
-          cat changed_files.txt || echo "No changes found."
-
-      - name: Pull Existing gh-pages Branch
+      # Copy html over to docs folder
+      - name: Move htmls
         run: |
-          # Try to clone the gh-pages branch; if it doesn't exist, create empty folder
-          if git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }} gh-pages-folder 2>/dev/null; then
-            echo "Successfully cloned gh-pages branch"
-            ls -lat gh-pages-folder
-          else
-            echo "gh-pages branch does not exist yet (first deployment). Creating empty folder."
-            mkdir -p gh-pages-folder
-          fi
-
           mkdir -p docs
-          cp -r gh-pages-folder/*.html docs 2>/dev/null || echo "No existing HTML files to copy."
+          cp .code/*.html docs
 
-      - name: Render Updated Quarto Files
+      - name: list the contents of .code directory
         run: |
-          if [ -s changed_files.txt ]; then
-            echo "Files to render:"
-            cat changed_files.txt
+          echo "Current dir: $(pwd)"
+          ls -la .code
+          ls -la
+          ## apparently gh cant create an artifact out of a directory that starts with a .
+          mkdir -p tmp-code
+          cp -p .code/*.html tmp-code/
+          ls -la tmp-code
 
-            docker run --rm \
-              -v ${{ github.workspace }}:/workspace \
-              -w /workspace \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-              bash -c "cat changed_files.txt | xargs -I {} quarto render {}"
+      - name: Save HTML cache if it was not previously restored
+        uses: actions/cache@v4
+        #if: steps.html-cache.outputs.cache-hit != 'true'
+        with:
+          path: tmp-code
+          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
 
-            # Copy rendered files to docs folder
-            cp tut/*.html docs/ 2>/dev/null || echo "No HTML files to copy."
-          else
-            echo "No updated files to render."
-          fi
+      # - name: Get last GitHub Pages deployment timestamp
+      #   run: |
+      #     RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+      #       "https://api.github.com/repos/${{ github.repository }}/pages/builds")
+
+      #     # Check if response is an array and has elements
+      #     if echo "$RESPONSE" | jq -e '.[0]' > /dev/null 2>&1; then
+      #       DEPLOY_TIME_RAW=$(echo "$RESPONSE" | jq -r '.[0].updated_at')
+      #       DEPLOY_TIME=$(date -d "$DEPLOY_TIME_RAW" +%s)
+      #       echo "Last deployment: $DEPLOY_TIME_RAW ($DEPLOY_TIME)"
+      #     else
+      #       # No deployments yet, set to epoch (0) so all files are considered modified
+      #       DEPLOY_TIME=0
+      #       echo "No previous deployments found. Setting DEPLOY_TIME to 0 (all files will be rendered)"
+      #     fi
+
+      #     echo "DEPLOY_TIME=$DEPLOY_TIME" >> $GITHUB_ENV
+
+      # - name: Find modified .qmd files
+      #   run: |
+      #     git ls-tree -r --name-only origin/main | grep '.code/.*\.qmd$' | while read file; do
+      #       MODIFIED_TIME_RAW=$(git log -1 --format="%ci" -- "$file")
+      #       MODIFIED_TIME=$(date -d "$MODIFIED_TIME_RAW" +%s)
+      #       echo "File: $file | Modified: $MODIFIED_TIME_RAW ($MODIFIED_TIME)"
+      #       if [[ "$MODIFIED_TIME" > "$DEPLOY_TIME" ]]; then
+      #         echo "$file was modified after last deployment."
+      #         echo "$file" >> changed_files.txt
+      #       fi
+      #     done
+
+      #     echo "Changed files:"
+      #     cat changed_files.txt || echo "No changes found."
+
+      # - name: Pull Existing gh-pages Branch
+      #   run: |
+      #     # Try to clone the gh-pages branch; if it doesn't exist, create empty folder
+      #     if git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }} gh-pages-folder 2>/dev/null; then
+      #       echo "Successfully cloned gh-pages branch"
+      #       ls -lat gh-pages-folder
+      #     else
+      #       echo "gh-pages branch does not exist yet (first deployment). Creating empty folder."
+      #       mkdir -p gh-pages-folder
+      #     fi
+
+      #     mkdir -p docs
+      #     cp -r gh-pages-folder/*.html docs 2>/dev/null || echo "No existing HTML files to copy."
+
+      # - name: Render Updated Quarto Files
+      #   run: |
+      #     if [ -s changed_files.txt ]; then
+      #       echo "Files to render:"
+      #       cat changed_files.txt
+
+      #       docker run --rm \
+      #         -v ${{ github.workspace }}:/workspace \
+      #         -w /workspace \
+      #         ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+      #         bash -c "cat changed_files.txt | xargs -I {} quarto render {}"
+
+      #       # Copy rendered files to docs folder
+      #       cp tut/*.html docs/ 2>/dev/null || echo "No HTML files to copy."
+      #     else
+      #       echo "No updated files to render."
+      #     fi
 
       - name: Configure git
         run: |
