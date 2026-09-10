@@ -133,6 +133,7 @@ RUN R -e "options(repos = \
   pak::pkg_install(c('ggdag')); \
   pak::pkg_install(c('rstanarm')); \
   pak::pkg_install(c('timcdlucas/INLAutils')); \
+  pak::pkg_install(c('collapse')); \
 "
 
 
