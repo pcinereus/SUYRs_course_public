@@ -71,7 +71,7 @@ RUN R -e "options(repos = \
   pak::pkg_install(c('plotrix', 'PBSmapping')); \
   pak::pkg_install(c('bayesplot', 'ggmcmc', 'rstan', 'posterior')); \
   pak::pkg_install(c('broom', 'broom.mixed', 'modelsummary', 'marginaleffects')); \
-  pak::pkg_install(c('tinytable', 'vegan', 'ggvegan', 'pdp', 'randomforest')); \
+  pak::pkg_install(c('tinytable', 'vegan', 'ggvegan', 'pdp', 'randomForest')); \
 "
 
 RUN R -e "install.packages('INLA',repos=c(getOption('repos'),INLA='https://inla.r-inla-download.org/R/stable'), dep=TRUE)"
