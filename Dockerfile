@@ -187,8 +187,8 @@ RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
 
   # Rebuild LaTeX font database \
   system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "mktexlsr"), ignore.stdout = TRUE); \
-  if (file.exists(mktexlsr_path)) {
-    system(paste(mktexlsr_path))
+  if (file.exists(mktexlsr_path)) { \
+    system(paste(mktexlsr_path)) \
   }; \
   system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "updmap-sys", "--enable Map=xkcd.map"), ignore.stdout = FALSE); \
   if (file.exists(updmap_path)) { \
