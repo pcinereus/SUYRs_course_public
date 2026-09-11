@@ -1,0 +1,123 @@
+
+
+
+# Exploratory data analysis
+
+::: {.columns}
+:::: {.column width="50%"}
+
+Random intercepts model formula:
+$$
+\begin{align}
+y_i &\sim{} \mathcal{N}(n, p_i)\\
+ln\left(\frac{p_i}{1-p_1}\right) &=\boldsymbol{\beta} \bf{X_i} + \boldsymbol{\gamma} \bf{Z_i}\\
+\beta_0 &\sim{} \mathcal{N}(0, 2.5)\\
+\beta_1 &\sim{} \mathcal{N}(0, 3)\\
+\boldsymbol{\gamma_j} &\sim{} \mathcal{N}(0, \sigma^2_b)\\
+\sigma^2_b &\sim{} t(3, 0, 1.5)\\
+\end{align}
+$$
+
+::::
+:::: {.column width="50%"}
+
+Random intercept/slope model formula:
+$$
+\begin{align}
+y_i &\sim{} \mathcal{N}(n, p_i)\\
+ln\left(\frac{p_i}{1-p_1}\right) &=\boldsymbol{\beta} \bf{X_i} + \boldsymbol{\gamma} \bf{Z_i}\\
+\beta_0 &\sim{} \mathcal{N}(0, 2)\\
+\beta_1 &\sim{} \mathcal{N}(0, 10)\\
+\boldsymbol{\gamma_j} &\sim{} \mathcal{N}(0, \boldsymbol{\Sigma})\\
+\boldsymbol{\Sigma} &= \boldsymbol{D}({\sigma_b^2})\boldsymbol{\Omega}\boldsymbol{D}({\sigma_b^2})\\
+\boldsymbol{\Omega} &\sim{} LKJ(\zeta)\\
+\sigma_b^2 &\sim{} \mathcal{t}(3,0,1.5)\\
+\end{align}
+$$
+::::
+:::
+
+where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed and random effects parameters respectively
+and $\bf{X}$ is the model matrix representing the overall intercept and effects of symbionts on the probability of the colony experiencing predation.
+$\bf{Z}$ represents a cell means model matrix for the random intercepts associated with individual coral colonies.
+
+
+# Fit the model
+
+
+
+# MCMC sampling diagnostics
+
+
+# Model validation
+
+::: {.panel-tabset}
+
+## brms
+
+:::: {.panel-tabset}
+
+### pp check
+
+Post predictive checks provide additional diagnostics about the fit of the
+model.  Specifically, they provide a comparison between predictions drawn from
+the model and the observed data used to train the model.
+
+
+- dens_overlay: plots the density distribution of the observed data (black line)
+overlayed on top of 50 density distributions generated from draws from the model
+(light blue).  Ideally, the 50 realisations should be roughly consistent with
+the observed data.
+
+The model draws appear to be consistent with the observed data.
+
+- error_scatter_avg: this plots the observed values against the average
+  residuals. Similar to a residual plot, we do not want to see any patterns in
+  this plot.  Note, this is not really that useful for models that involve a
+  binomial response
+
+
+This is not really interpretable
+
+- intervals:  plots the observed data overlayed on top of posterior predictions
+associated with each level of the predictor.  Ideally, the observed data should
+all fall within the predictive intervals.
+
+
+
+The `shinystan` package allows the full suite of MCMC diagnostics and posterior
+predictive checks to be accessed via a web interface.
+
+
+### DHARMa residuals
+
+DHARMa residuals provide very useful diagnostics.  Unfortunately, we cannot
+directly use the `simulateResiduals()` function to generate the simulated
+residuals.  However, if we are willing to calculate some of the components
+yourself, we can still obtain the simulated residuals from the fitted stan model.
+
+We need to supply:
+
+- simulated (predicted) responses associated with each observation.
+- observed values
+- fitted (predicted) responses (averaged) associated with each observation
+
+**Conclusions:**
+
+- the simulated residuals do not suggest any issues with the residuals
+- there is no evidence of a lack of fit.
+
+::::
+:::
+<!-- END_PRIVATE-->
+
+# Partial effects plots
+
+
+# Model investigation
+
+
+# Further analyses
+
+
+# References
