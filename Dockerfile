@@ -212,4 +212,5 @@ RUN fc-list
 
 RUN fc-list | grep -i xkcd || echo "xkcd font not found in fc-list"
 
-RUN find / -name "xkcd.ttf" || echo "xkcd.ttf not found in filesystem"
+RUN find / -name "xkcd.ttf"
+
