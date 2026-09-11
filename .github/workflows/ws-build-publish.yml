@@ -5,7 +5,7 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'ws/**'
+      - '.code/**'
 
 env:
   REGISTRY: ghcr.io
@@ -32,26 +32,41 @@ jobs:
       - name: Pull Docker image
         run: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
-      - name: Restore HTML cache
-        uses: actions/cache@v4
-        with:
-          path: tmp-code
-          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
-          restore-keys: |
-            qmd-cache-
+      # - name: Restore HTML cache
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: tmp-code
+      #     key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
+      #     restore-keys: |
+      #       qmd-cache-
 
-      - name: Restore HTML files to .code directory
+      # - name: Restore HTML files to .code directory
+      #   run: |
+      #     echo "Contents of the .code directory before copy"
+      #     ls -la .code
+      #     if [ -d tmp-code ]; then
+      #       echo "Contents of the tmp-code directory"
+      #       ls -la tmp-code
+      #       cp -p tmp-code/*.html .code/
+      #       echo "Contents of the .code directory after copy"
+      #       ls -la .code
+      #     else
+      #       echo "No previously rendered HTML files found. Skipping restore."
+      #     fi
+
+      - name: Restore HTML files from gh-pages
         run: |
-          echo "Contents of the .code directory before copy"
-          ls -la .code
-          if [ -d tmp-code ]; then
-            echo "Contents of the tmp-code directory"
-            ls -la tmp-code
-            cp -p tmp-code/*.html .code/
-            echo "Contents of the .code directory after copy"
+          # Try to get HTML files from the gh-pages branch
+          if git clone --branch gh-pages --single-branch --depth 1 \
+              https://github.com/${{ github.repository }} gh-pages-tmp 2>/dev/null; then
+            echo "Successfully cloned gh-pages branch"
+            # Copy HTML files to .code directory, preserving timestamps
+            cp -p gh-pages-tmp/*.html .code/ 2>/dev/null || echo "No HTML files found"
+            rm -rf gh-pages-tmp
+            echo "Contents of .code directory after restore:"
             ls -la .code
           else
-            echo "No previously rendered HTML files found. Skipping restore."
+            echo "gh-pages branch not found (first run). Proceeding with full rebuild."
           fi
 
       # Render worksheets
@@ -79,12 +94,12 @@ jobs:
           cp -p .code/*.html tmp-code/
           ls -la tmp-code
 
-      - name: Save HTML cache if it was not previously restored
-        uses: actions/cache@v4
-        #if: steps.html-cache.outputs.cache-hit != 'true'
-        with:
-          path: tmp-code
-          key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
+      # - name: Save HTML cache if it was not previously restored
+      #   uses: actions/cache@v4
+      #   #if: steps.html-cache.outputs.cache-hit != 'true'
+      #   with:
+      #     path: tmp-code
+      #     key: qmd-cache-${{ hashFiles('.code/*.qmd') }}
 
       # - name: Get last GitHub Pages deployment timestamp
       #   run: |
