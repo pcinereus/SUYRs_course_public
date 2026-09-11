@@ -173,3 +173,21 @@ RUN mkdir -p /usr/share/fonts/custom && \
 
 # Rebuild font cache
 RUN fc-cache -fv && fc-list
+
+# Make fonts available to LaTeX/TinyTeX
+RUN Rscript -e '
+  tinytex_home <- tinytex::tinytex_root()
+  fonts_dir <- file.path(tinytex_home, "texmf-local", "fonts", "truetype", "custom")
+  dir.create(fonts_dir, recursive = TRUE, showWarnings = FALSE)
+
+  # Copy fonts to TinyTeX directory
+  font_files <- list.files("/usr/share/fonts/custom", pattern = "\\.ttf$", full.names = TRUE)
+  file.copy(font_files, fonts_dir, overwrite = TRUE)
+
+  # Rebuild LaTeX font database
+  system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "mktexlsr"), ignore.stdout = TRUE)
+  system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "updmap-sys", "--enable Map=xkcd.map"), ignore.stdout = FALSE)
+'
+
+# Also ensure system can find fonts via XDG
+ENV XDG_DATA_DIRS="/usr/share/fonts:/usr/local/share:/usr/share"
