@@ -191,8 +191,8 @@ RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
     system(paste(mktexlsr_path))
   }; \
   system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "updmap-sys", "--enable Map=xkcd.map"), ignore.stdout = FALSE); \
-  if (file.exists(updmap_path)) {
-    system(paste(updmap_path), ignore.stdout = TRUE)
+  if (file.exists(updmap_path)) { \
+    system(paste(updmap_path), ignore.stdout = TRUE) \
   }; \
 ' || true
 
@@ -202,7 +202,7 @@ ENV XDG_DATA_DIRS="/usr/share/fonts:/usr/local/share:/usr/share"
 # Also rebuild XeTeX font cache explicitly
 RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
   luaotfload_path <- file.path(tinytex_home, "bin", "x86_64-linux", "luaotfload-tool"); \
-  if (file.exists(luaotfload_path)) {
-    system(paste(luaotfload_path, "--update --force"))
+  if (file.exists(luaotfload_path)) { \
+    system(paste(luaotfload_path, "--update --force")) \
   }; \
 ' || true
