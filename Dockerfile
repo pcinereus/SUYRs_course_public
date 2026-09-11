@@ -142,6 +142,12 @@ RUN R -e "options(repos = \
   pak::pkg_install(c('julianfaraway/brinla')); \
 "
 
+RUN R -e "options(repos = \
+    list(CRAN = \"https://packagemanager.posit.co/cran/2026-09-01\")); \
+  options(Ncpus = 4); \
+  pak::pkg_install(c('geoR')); \
+"
+
 # Install common fonts from Ubuntu repositories
 RUN apt-get update && apt-get install -y \
     fonts-liberation \
