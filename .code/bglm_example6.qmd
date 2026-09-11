@@ -253,6 +253,7 @@ quinn |> ggplot(aes(y=RECRUITS, x=fSEASON, fill=DENSITY)) + geom_boxplot()
   be expected with the a Poisson
 - evidently there are numerous zeros in the Winter/Low group
 <!-- END_PRIVATE-->
+
 # Fit the model
 
 <!-- START_PRIVATE-->

@@ -194,6 +194,7 @@ quinn <- quinn |>
                          DENSITY = factor(DENSITY))
 ```
 # Exploratory data analysis
+
 # Fit the model
 
 
