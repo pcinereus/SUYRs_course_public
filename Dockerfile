@@ -209,3 +209,7 @@ RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
 
 ## Get a list of all installed fonts to verify installation
 RUN fc-list
+
+RUN fc-list | grep -i xkcd || echo "xkcd font not found in fc-list"
+
+RUN find / -name "xkcd.ttf" || echo "xkcd.ttf not found in filesystem"
