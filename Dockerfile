@@ -183,6 +183,8 @@ RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
   font_files <- list.files("/usr/share/fonts/custom", pattern = "\\.ttf$", full.names = TRUE); \
   file.copy(font_files, fonts_dir, overwrite = TRUE); \
 
+  tinytex::tlmgr_install("xkcd"); \
+
   # Rebuild LaTeX font database \
   system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "mktexlsr"), ignore.stdout = TRUE); \
   system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "updmap-sys", "--enable Map=xkcd.map"), ignore.stdout = FALSE); \
