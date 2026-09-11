@@ -777,8 +777,8 @@ Of these, we will focus on:
   any other trace for that parameter).
 
 ```{r modelValidation1l, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=12}
-loyn_ggs <- ggs(loyn_rstanarm3)
-ggs_traceplot(loyn_ggs)
+## loyn_ggs <- ggs(loyn_rstanarm3)
+## ggs_traceplot(loyn_ggs)
 ```
 
    The chains appear well mixed and very similar
@@ -787,7 +787,7 @@ ggs_traceplot(loyn_ggs)
   MCMC sample lags for each parameter and each chain
 
 ```{r modelValidation1m, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=12}
-ggs_autocorrelation(loyn_ggs)
+## ggs_autocorrelation(loyn_ggs)
 ```
 
    There is no evidence of autocorrelation in the MCMC samples
@@ -798,7 +798,7 @@ ggs_autocorrelation(loyn_ggs)
   parameter estimated.
 
 ```{r modelValidation1n, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
-ggs_Rhat(loyn_ggs)
+## ggs_Rhat(loyn_ggs)
 ```
 
   All Rhat values are below 1.05, suggesting the chains have converged.
@@ -813,18 +813,18 @@ ggs_Rhat(loyn_ggs)
   If the ratios are low, tightening the priors may help.
 
 ```{r modelValidation1o, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
-ggs_effective(loyn_ggs, version_effective = "BDA3")
+## ggs_effective(loyn_ggs, version_effective = "BDA3")
 ```
 
   Ratios all very high.
 
 <details><summary>More diagnostics</summary>
 ```{r modelValidation1p, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
-ggs_crosscorrelation(loyn_ggs)
+## ggs_crosscorrelation(loyn_ggs)
 ```
 
 ```{r modelValidation1q, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
-ggs_grb(loyn_ggs)
+## ggs_grb(loyn_ggs)
 ```
 </details>
 
