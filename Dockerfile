@@ -206,3 +206,6 @@ RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
     system(paste(luaotfload_path, "--update --force")) \
   }; \
 ' || true
+
+## Get a list of all installed fonts to verify installation
+RUN fc-list
