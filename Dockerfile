@@ -176,19 +176,33 @@ RUN fc-cache -fv && fc-list
 
 # Make fonts available to LaTeX/TinyTeX
 RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
-  fonts_dir <- file.path(tinytex_home, "texmf-local", "fonts", "truetype", "custom"); \
+  #fonts_dir <- file.path(tinytex_home, "texmf-local", "fonts", "truetype", "custom"); \
+  fonts_dir <- file.path(tinytex_home, "texmf-local", "fonts", "opentype", "public", "custom"); \
   dir.create(fonts_dir, recursive = TRUE, showWarnings = FALSE); \
 
-  # Copy fonts to TinyTeX directory \
-  font_files <- list.files("/usr/share/fonts/custom", pattern = "\\.ttf$", full.names = TRUE); \
+  # Copy all TTF/OTF fonts to TinyTeX directory \
+  ## font_files <- list.files("/usr/share/fonts/custom", pattern = "\\.ttf$", full.names = TRUE); \
+  font_files <- list.files("/usr/share/fonts/custom", pattern = "\\.(ttf|otf)$", full.names = TRUE); \
   file.copy(font_files, fonts_dir, overwrite = TRUE); \
-
-  tinytex::tlmgr_install("xkcd"); \
 
   # Rebuild LaTeX font database \
   system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "mktexlsr"), ignore.stdout = TRUE); \
+  if (file.exists(mktexlsr_path)) {
+    system(paste(mktexlsr_path))
+  }; \
   system(paste(file.path(tinytex_home, "bin", "x86_64-linux"), "updmap-sys", "--enable Map=xkcd.map"), ignore.stdout = FALSE); \
-'
+  if (file.exists(updmap_path)) {
+    system(paste(updmap_path), ignore.stdout = TRUE)
+  }; \
+' || true
 
 # Also ensure system can find fonts via XDG
 ENV XDG_DATA_DIRS="/usr/share/fonts:/usr/local/share:/usr/share"
+
+# Also rebuild XeTeX font cache explicitly
+RUN Rscript -e 'tinytex_home <- tinytex::tinytex_root(); \
+  luaotfload_path <- file.path(tinytex_home, "bin", "x86_64-linux", "luaotfload-tool"); \
+  if (file.exists(luaotfload_path)) {
+    system(paste(luaotfload_path, "--update --force"))
+  }; \
+' || true
