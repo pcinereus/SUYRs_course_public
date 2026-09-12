@@ -1101,21 +1101,28 @@ ltmp_sub_brm2 |>
       min = lower.HPD, ymax = upper.HPD), fill = "orange", alpha = 0.3) +
   theme_classic() +
   scale_y_continuous("Live hard coral cover", label = scales::percent_format())
+
 ```
 
 :::
 
 <!-- END_PRIVATE-->
 
+## As a Gaussian Process
+
+<!-- START_PRIVATE-->
+
+::: {.panel-tabset}
+
+
+## Define formula and priors
+
 ```{r}
-#| label: as a gam
+#| label: gp priors
 #| results: markup
-#| eval: false
+#| eval: true
 #| echo: true
 #| cache: false
-
-
-
 ltmp_form <- bf(
     n.points | trials(total.points) ~ gp(REPORT_YEAR) +
         (1 | REEF_SITE) + (1 | REEF_SITE_TRANSECT),
@@ -1135,33 +1142,150 @@ ltmp_sub |>
     )
 priors <- prior(normal(-1.1, 0.6), class = "Intercept") +
   prior(student_t(3, 0, 0.6), class = "sd") +
-  prior(lognormal(log(5), 1), class = "lscale", coef = "gpREPORT_YEAR") +
+  ## prior(lognormal(log(5), 1), class = "lscale", coef = "gpREPORT_YEAR") +
   prior(exponential(5), class = "lscale", coef = "gpREPORT_YEAR") +
   prior(student_t(3, 0, 2), class = "sdgp")
-  ## prior(gamma(2, 0.1), class = "lscale")
-  ## prior(student_t(3, 0, 1/30), class = "lscale")
-  ## prior(lognormal(log(5), 0.7), class = "lscale", coef = "gpREPORT_YEAR")
-  ## prior(student_t(3, 0, 1), class = "lscale", coef = "gpREPORT_YEAR")
-ltmp_sub_brm5 <- brm(ltmp_form,
-                  data = ltmp_sub,
-                  prior = priors,
-                  sample_prior = 'yes',
-                  iter = 3000,
-                  warmup = 1000,
-                  chains = 3, cores = 3,
-                  thin = 10,
-                  refresh = 100,
-                  seed = 123,
-                  control = list(adapt_delta = 0.99, max_treedepth = 20),
-                  backend = "cmdstanr"
-                  )
 
-ltmp_sub_brm5 |>
+```
+
+## Fit model
+
+```{r}
+#| label: gp fit model
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+ltmp_sub_brm3 <- brm(ltmp_form,
+  data = ltmp_sub,
+  prior = priors,
+  sample_prior = 'yes',
+  iter = 3000,
+  warmup = 1000,
+  chains = 3, cores = 3,
+  thin = 10,
+  refresh = 100,
+  seed = 123,
+  control = list(adapt_delta = 0.99, max_treedepth = 20),
+  backend = "cmdstanr"
+)
+
+```
+
+## Partial plots
+
+```{r}
+#| label: gp partial plots
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+ltmp_sub_brm3 |>
   conditional_effects(conditions = data.frame(total.points = 200)) |>
   plot(points = TRUE)
+ltmp_sub_brm3 |>
+  conditional_effects(conditions = data.frame(total.points = 1)) |>
+  plot(points = FALSE)
+```
+
+## MCMC sampling diagnostics
+
+```{r gp mcmc diagnostics 1, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+pars <- ltmp_sub_brm3 |>
+    get_variables() |>
+    str_subset("^b_.*|^sd.*")
+pars
+ltmp_sub_brm3$fit |>
+    stan_trace(pars = pars)
+```
+
+```{r gp mcmc diagnostics 2, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm3$fit |>
+    stan_ac(pars = pars)
+```
+
+```{r gp mcmc diagnostics 3, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm3$fit |> stan_rhat()
+```
+
+```{r gp mcmc diagnostics 4, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm3$fit |> stan_ess()
+```
+
+```{r gp mcmcm diagnostics 5, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm3$fit |>
+    stan_dens(separate_chains = TRUE, pars = pars)
+```
 
 
-ltmp_sub_brm5 |> summary()
+## Model validation
+
+```{r gp model validation 1, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm3 |> pp_check(type = 'dens_overlay', ndraws = 100)
+```
+
+```{r gp model validation 2, results='markdown', eval=TRUE, fig.width=8, fig.height=10}
+ltmp_sub_resids <- make_brms_dharma_res(ltmp_sub_brm3, integerResponse = TRUE)
+wrap_elements(~testUniformity(ltmp_sub_resids)) +
+               wrap_elements(~plotResiduals(ltmp_sub_resids, form = factor(rep(1, nrow(ltmp_sub))))) +
+               wrap_elements(~plotResiduals(ltmp_sub_resids, quantreg = TRUE)) +
+               wrap_elements(~testDispersion(ltmp_sub_resids))
+```
+
+## Model investigation
+
+```{r}
+#| label: gp summary
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+ltmp_sub_brm3 |> summary()
+```
+
+## Summary figures
+
+```{r}
+#| label: gp figures
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+ltmp_glmm <- ltmp_sub_brm1b |>
+    emmeans(~fREPORT_YEAR, type = "response") |>
+    as.data.frame() |>
+    mutate(
+        fREPORT_YEAR = factor(fREPORT_YEAR, levels = rev(levels(fREPORT_YEAR))),
+        REPORT_YEAR = as.numeric(as.character(fREPORT_YEAR))
+    )
+
+ltmp_sub_brm3 |>
+  conditional_effects() |>
+  plot() |>
+  _[[1]] +
+  geom_line(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR), colour = "red") +
+  geom_ribbon(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR,
+      min = lower.HPD, ymax = upper.HPD), fill = "orange", alpha = 0.3) +
+  geom_point(data = ltmp_sub,
+    aes(y = n.points / total.points, x = REPORT_YEAR), inherit.aes = FALSE, alpha = 0.1) +
+  theme_classic() +
+  scale_y_continuous("Live hard coral cover", label = scales::percent_format())
+
+
+ltmp_sub_brm3 |>
+  conditional_effects(spaghetti = TRUE) |>
+  plot() |>
+  _[[1]] +
+  geom_line(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR), colour = "blue") +
+  geom_ribbon(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR,
+      min = lower.HPD, ymax = upper.HPD), fill = "orange", alpha = 0.3) +
+  theme_classic() +
+  scale_y_continuous("Live hard coral cover", label = scales::percent_format())
+
 
 newdata <- data.frame(
   REPORT_YEAR = seq(1995, 2023, len = 100),
@@ -1170,7 +1294,7 @@ newdata <- data.frame(
   total.points = 1
 )
 ltmp_sub_sum <-
-  ltmp_sub_brm5 |>
+  ltmp_sub_brm3 |>
     epred_draws(newdata = newdata, re_formula = NA) |>
   ungroup() |>
   dplyr::select(REPORT_YEAR, .epred) |>
@@ -1184,8 +1308,9 @@ ltmp_sub_sum |>
   geom_point(data = ltmp_sub,
     aes(y = HC/100))
 
+ltmp_gp <- ltmp_sub_sum
 
-ltmp_sub_brm5 |>
+ltmp_sub_brm3 |>
   epred_draws(newdata = newdata, re_formula = NA) |>
   ungroup() |>
   dplyr::select(.draw, REPORT_YEAR, .epred) |>
@@ -1205,7 +1330,7 @@ forcast_newdata <- data.frame(
 )
 
 ltmp_sub_forcast_sum <-
-  ltmp_sub_brm5 |>
+  ltmp_sub_brm3 |>
     epred_draws(newdata = forcast_newdata, re_formula = NA) |>
   ungroup() |>
   dplyr::select(REPORT_YEAR, .epred) |>
@@ -1226,12 +1351,12 @@ ltmp_sub_sum |>
 
 
 
-forcast <- ltmp_sub_brm5 |>
+forcast <- ltmp_sub_brm3 |>
     epred_draws(newdata = forcast_newdata, re_formula = NA) |>
     ungroup() |>
   dplyr::select(.draw, REPORT_YEAR, .epred)
 
-ltmp_sub_brm5 |>
+ltmp_sub_brm3 |>
     epred_draws(newdata = newdata, re_formula = NA) |>
     ungroup() |>
     dplyr::select(.draw, REPORT_YEAR, .epred) |>
@@ -1253,7 +1378,7 @@ forcast_sum <- forcast |>
   group_by(REPORT_YEAR) |>
   summarise_draws(median, HDInterval::hdi)
 
-ltmp_sub_brm5 |>
+ltmp_sub_brm3 |>
     epred_draws(newdata = newdata, re_formula = NA) |>
     ungroup() |>
     dplyr::select(.draw, REPORT_YEAR, .epred) |>
@@ -1285,7 +1410,7 @@ newdata <- data.frame(
   total.points = 1
 )
 ltmp_sub_sum <-
-  ltmp_sub_brm5 |>
+  ltmp_sub_brm3 |>
   epred_draws(newdata = newdata, re_formula = NA) |>
   tidybayes::compare_levels(
     var = .epred, by = REPORT_YEAR,
@@ -1297,7 +1422,7 @@ ltmp_sub_sum <-
   summarise_draws(median, HDInterval::hdi)
 
 
-  ltmp_sub_brm5 |>
+  ltmp_sub_brm3 |>
   epred_draws(newdata = newdata, re_formula = NA) |>
   mutate(.epred = log(.epred)) |>
   tidybayes::compare_levels(
@@ -1311,3 +1436,8 @@ ltmp_sub_sum <-
   summarise_draws(median, HDInterval::hdi)
 
 ```
+
+:::
+
+<!-- END_PRIVATE-->
+
