@@ -652,11 +652,11 @@ wrap_elements(~testUniformity(ltmp_sub_resids)) +
 ```
 
 ```{r modelValidation6aaa, results='markdown', eval=TRUE, fig.width=8, fig.height=10}
-resids2 <- recalculateResiduals(ltmp_sub_resids, group = unique(ltmp_sub$fREPORT_YEAR))
-testTemporalAutocorrelation(resids2, time = unique(ltmp_sub$fREPORT_YEAR))
+## resids2 <- recalculateResiduals(ltmp_sub_resids, group = unique(ltmp_sub$fREPORT_YEAR))
+## testTemporalAutocorrelation(resids2, time = unique(ltmp_sub$fREPORT_YEAR))
 
-library(geoR)
-autocor_check(ltmp_sub, ltmp_sub_brm1b, variable =  "fREPORT_YEAR", n.sim =  250)
+## library(geoR)
+## autocor_check(ltmp_sub, ltmp_sub_brm1b, variable =  "fREPORT_YEAR", n.sim =  250)
 
 
 ```
