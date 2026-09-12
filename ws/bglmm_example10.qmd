@@ -1,0 +1,380 @@
+
+---
+title: "Bayesian GLMM Part10"
+author: "Murray Logan"
+date: today
+date-format: "DD/MM/YYYY"
+format:
+  html:
+    ## Format
+    theme: [default, ../resources/ws-style.scss]
+    css: ../resources/ws_style.css
+    html-math-method: mathjax
+    ## Table of contents
+    toc: true
+    toc-float: true
+    ## Numbering
+    number-sections: true
+    number-depth: 3
+    ## Layout
+    page-layout: full
+    fig-caption-location: "bottom"
+    fig-align: "center"
+    fig-width: 4
+    fig-height: 4
+    fig-dpi: 72
+    tbl-cap-location: top
+    ## Code
+    code-fold: false
+    code-tools: true
+    code-summary: "Show the code"
+    code-line-numbers: true
+    code-block-border-left: "#ccc"
+    code-copy: true
+    highlight-style: atom-one
+    ## Execution
+    execute:
+      echo: true
+      cache: true
+    ## Rendering
+    embed-resources: true
+crossref:
+  fig-title: '**Figure**'
+  fig-labels: arabic
+  tbl-title: '**Table**'
+  tbl-labels: arabic
+engine: knitr
+output_dir: "docs"
+documentclass: article
+fontsize: 12pt
+mainfont: Arial
+mathfont: LiberationMono
+monofont: DejaVu Sans Mono
+classoption: a4paper
+bibliography: ../resources/references.bib
+---
+
+```{r}
+#| label: setup
+#| include: false
+#| cache: false
+
+knitr::opts_chunk$set(cache.lazy = FALSE,
+                      tidy = "styler")
+options(tinytex.engine = "xelatex")
+```
+
+
+# Preparations
+
+Load the necessary libraries
+
+```{r}
+#| label: libraries
+#| output: false
+#| eval: true
+#| warning: false
+#| message: false
+#| cache: false
+library(broom)     #for tidy output
+library(knitr)     #for kable
+#library(effects)   #for partial effects plots
+library(emmeans)   #for estimating marginal means
+library(MASS)      #for glm.nb
+library(tidyverse) #for data wrangling
+library(brms)
+library(tidybayes)
+library(bayesplot)
+library(broom.mixed)
+library(rstan)
+library(patchwork)
+library(DHARMa)
+source('helperFunctions.R')
+```
+
+
+# Scenario
+
+For over 35 years, the AIMS long term monitoring program has performed
+benthic surveys of coral reefs on the Great Barrier Reef (GBR). To do
+so the team uses two main survey techniques 1) Manta Tow and 2) Photo
+transects. The current example focuses on data collected using the
+later technique.
+Within each reef, there are three sites on the north east flank and
+within each site there are five permanent transects. Every year, the
+team return and take photos every meter along the transects. Once back
+in the laboratory, five points from every photo are scored according
+to what is represented underneath the point.
+
+The main objective of long-term monitoring is to be able to report on
+status and trends. Specifically, what is the status of each major
+benthic group (such as hard coral, soft coral and macroalgae) and how
+are they changing (particularly in response to major disturbances).
+
+For this example, we will focus on a single reef (Agincourt Reef
+No.1).
+
+# Read in the data
+
+```{r readData, results='markdown', eval=TRUE}
+ltmp <- read_csv('../data/ltmp.csv', trim_ws=TRUE)
+glimpse(ltmp)
+```
+
+| AIMS_REEF_NAME | REPORT_YEAR | SITE_NO | TRANSECT_NO | HC   | n.points | total.points |
+|----------------|-------------|---------|-------------|------|----------|--------------|
+| Arlington Reef | 2006        | 1       | 1           | 10.0 | 20       | 200          |
+| Arlington Reef | 2006        | 1       | 2           | 10.5 | 21       | 200          |
+|                |             |         |             |      |          |              |
+
+
+# Data preparation
+
+
+# Exploratory Data Analysis
+
+
+
+# Fit the model
+
+::: {.panel-tabset}
+
+
+:::
+
+# MCMC sampling diagnostics
+
+::: {.panel-tabset}
+
+
+:::
+
+# Model validation
+
+::: {.panel-tabset}
+
+
+:::
+
+# Model investigation
+
+::: {.panel-tabset}
+
+
+:::
+
+
+# Further mnvestigations
+
+::: {.panel-tabset}
+
+:::
+
+
+# As a GAM
+
+
+```{r}
+#| label: as a gam
+#| results: markup
+#| eval: false
+#| echo: true
+#| cache: false
+
+
+
+ltmp_form <- bf(
+    n.points | trials(total.points) ~ gp(REPORT_YEAR) +
+        (1 | REEF_SITE) + (1 | REEF_SITE_TRANSECT),
+    family = binomial(link = "logit")
+)
+get_prior(ltmp_form, data = ltmp_sub)
+## we are not putting a prior on wiggliness directly.  Rather we are putting a prior on
+## GP hyperparameters.  The GP hyperparameters are the length scale and the standard deviation of the GP.  The length scale controls how quickly the GP can change (smaller values allow for more rapid changes), and the standard deviation controls how much variation there is in the GP.  We will put a prior on these hyperparameters.
+#- lscale: the length scale of the GP. Distance over which the GP function is correlated.  Smaller values allow for more rapid changes in the GP.  Larger values allow for smoother changes in the GP.
+#- sdgp: how much can the trend deviate from the intercept (on link scale)
+
+ltmp_sub |>
+    summarise(
+        Median = median(qlogis(HC/100)),
+        MAD = mad(qlogis(HC/100)),
+        N = mean(total.points)
+    )
+priors <- prior(normal(-1.1, 0.6), class = "Intercept") +
+  prior(student_t(3, 0, 0.6), class = "sd") +
+  prior(lognormal(log(5), 1), class = "lscale", coef = "gpREPORT_YEAR") +
+  prior(exponential(5), class = "lscale", coef = "gpREPORT_YEAR") +
+  prior(student_t(3, 0, 2), class = "sdgp")
+  ## prior(gamma(2, 0.1), class = "lscale")
+  ## prior(student_t(3, 0, 1/30), class = "lscale")
+  ## prior(lognormal(log(5), 0.7), class = "lscale", coef = "gpREPORT_YEAR")
+  ## prior(student_t(3, 0, 1), class = "lscale", coef = "gpREPORT_YEAR")
+ltmp_sub_brm5 <- brm(ltmp_form,
+                  data = ltmp_sub,
+                  prior = priors,
+                  sample_prior = 'yes',
+                  iter = 3000,
+                  warmup = 1000,
+                  chains = 3, cores = 3,
+                  thin = 10,
+                  refresh = 100,
+                  seed = 123,
+                  control = list(adapt_delta = 0.99, max_treedepth = 20),
+                  backend = "cmdstanr"
+                  )
+
+ltmp_sub_brm5 |>
+  conditional_effects(conditions = data.frame(total.points = 200)) |>
+  plot(points = TRUE)
+
+
+ltmp_sub_brm5 |> summary()
+
+newdata <- data.frame(
+  REPORT_YEAR = seq(1995, 2023, len = 100),
+  REEF_SITE = NA,
+  REEF_SITE_TRANSECT = NA,
+  total.points = 1
+)
+ltmp_sub_sum <-
+  ltmp_sub_brm5 |>
+    epred_draws(newdata = newdata, re_formula = NA) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ltmp_sub_sum |>
+  ggplot(aes(y = median, x = REPORT_YEAR)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "orange", alpha = 0.3) +
+  geom_line() +
+  geom_point(data = ltmp_sub,
+    aes(y = HC/100))
+
+
+ltmp_sub_brm5 |>
+  epred_draws(newdata = newdata, re_formula = NA) |>
+  ungroup() |>
+  dplyr::select(.draw, REPORT_YEAR, .epred) |>
+  ggplot(aes(y = .epred, x = REPORT_YEAR)) +
+  geom_line(aes(group = .draw), alpha = 0.1, colour = "orange") +
+  geom_line(data = ltmp_gp, inherit.aes = FALSE,
+    aes(y = median, x = REPORT_YEAR), colour = "white", linewidth = 2) +
+  geom_point(data = ltmp_sub,
+    aes(y = HC/100, x = REPORT_YEAR))
+
+
+forcast_newdata <- data.frame(
+  REPORT_YEAR = seq(2023, 2030, len = 100),
+  REEF_SITE = NA,
+  REEF_SITE_TRANSECT = NA,
+  total.points = 1
+)
+
+ltmp_sub_forcast_sum <-
+  ltmp_sub_brm5 |>
+    epred_draws(newdata = forcast_newdata, re_formula = NA) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ltmp_sub_sum |>
+    ggplot(aes(y = median, x = REPORT_YEAR)) +
+    geom_ribbon(aes(ymin = lower, ymax = upper), fill = "orange", alpha = 0.3) +
+    geom_line() +
+    geom_point(
+        data = ltmp_sub,
+        aes(y = HC / 100)
+    ) +
+  geom_ribbon(data = ltmp_sub_forcast_sum,
+    aes(ymin = lower, ymax = upper), fill = "red", alpha = 0.3) +
+  geom_line(data = ltmp_sub_forcast_sum)
+
+
+
+forcast <- ltmp_sub_brm5 |>
+    epred_draws(newdata = forcast_newdata, re_formula = NA) |>
+    ungroup() |>
+  dplyr::select(.draw, REPORT_YEAR, .epred)
+
+ltmp_sub_brm5 |>
+    epred_draws(newdata = newdata, re_formula = NA) |>
+    ungroup() |>
+    dplyr::select(.draw, REPORT_YEAR, .epred) |>
+    ggplot(aes(y = .epred, x = REPORT_YEAR)) +
+    geom_line(aes(group = .draw), alpha = 0.1, colour = "orange") +
+    geom_line(
+        data = ltmp_gp, inherit.aes = FALSE,
+        aes(y = median, x = REPORT_YEAR), colour = "white", linewidth = 2
+    ) +
+    geom_point(
+        data = ltmp_sub,
+        aes(y = HC / 100, x = REPORT_YEAR)
+    ) +
+  geom_line(data = forcast,
+    aes(group = .draw), alpha = 0.1, colour = "red")
+
+
+forcast_sum <- forcast |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ltmp_sub_brm5 |>
+    epred_draws(newdata = newdata, re_formula = NA) |>
+    ungroup() |>
+    dplyr::select(.draw, REPORT_YEAR, .epred) |>
+    ggplot(aes(y = .epred, x = REPORT_YEAR)) +
+    geom_line(aes(group = .draw), alpha = 0.1, colour = "orange") +
+    geom_line(
+        data = ltmp_gp, inherit.aes = FALSE,
+        aes(y = median, x = REPORT_YEAR), colour = "white", linewidth = 2
+    ) +
+    geom_point(
+        data = ltmp_sub,
+        aes(y = HC / 100, x = REPORT_YEAR)
+    ) +
+  geom_line(data = forcast,
+    aes(group = .draw), alpha = 0.1, colour = "red") +
+  geom_line(
+    data = forcast_sum, inherit.aes = FALSE,
+    aes(y = median, x = REPORT_YEAR), colour = "grey", linewidth = 2
+  )
+
+
+
+
+
+newdata <- data.frame(
+  REPORT_YEAR = c(1995, 2005),
+  REEF_SITE = NA,
+  REEF_SITE_TRANSECT = NA,
+  total.points = 1
+)
+ltmp_sub_sum <-
+  ltmp_sub_brm5 |>
+  epred_draws(newdata = newdata, re_formula = NA) |>
+  tidybayes::compare_levels(
+    var = .epred, by = REPORT_YEAR,
+    comparison = emmeans_comparison("revpairwise")
+  ) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+
+  ltmp_sub_brm5 |>
+  epred_draws(newdata = newdata, re_formula = NA) |>
+  mutate(.epred = log(.epred)) |>
+  tidybayes::compare_levels(
+    var = .epred, by = REPORT_YEAR,
+    comparison = emmeans_comparison("revpairwise")
+  ) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  mutate(.epred = exp(.epred)) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+```

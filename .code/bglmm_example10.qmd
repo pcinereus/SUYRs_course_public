@@ -1,0 +1,1313 @@
+
+---
+title: "Bayesian GLMM Part10"
+author: "Murray Logan"
+date: today
+date-format: "DD/MM/YYYY"
+format:
+  html:
+    ## Format
+    theme: [default, ../resources/ws-style.scss]
+    css: ../resources/ws_style.css
+    html-math-method: mathjax
+    ## Table of contents
+    toc: true
+    toc-float: true
+    ## Numbering
+    number-sections: true
+    number-depth: 3
+    ## Layout
+    page-layout: full
+    fig-caption-location: "bottom"
+    fig-align: "center"
+    fig-width: 4
+    fig-height: 4
+    fig-dpi: 72
+    tbl-cap-location: top
+    ## Code
+    code-fold: false
+    code-tools: true
+    code-summary: "Show the code"
+    code-line-numbers: true
+    code-block-border-left: "#ccc"
+    code-copy: true
+    highlight-style: atom-one
+    ## Execution
+    execute:
+      echo: true
+      cache: true
+    ## Rendering
+    embed-resources: true
+crossref:
+  fig-title: '**Figure**'
+  fig-labels: arabic
+  tbl-title: '**Table**'
+  tbl-labels: arabic
+engine: knitr
+output_dir: "docs"
+documentclass: article
+fontsize: 12pt
+mainfont: Arial
+mathfont: LiberationMono
+monofont: DejaVu Sans Mono
+classoption: a4paper
+bibliography: ../resources/references.bib
+---
+
+```{r}
+#| label: setup
+#| include: false
+#| cache: false
+
+knitr::opts_chunk$set(cache.lazy = FALSE,
+                      tidy = "styler")
+options(tinytex.engine = "xelatex")
+```
+
+
+# Preparations
+
+Load the necessary libraries
+
+```{r}
+#| label: libraries
+#| output: false
+#| eval: true
+#| warning: false
+#| message: false
+#| cache: false
+library(broom)     #for tidy output
+library(knitr)     #for kable
+#library(effects)   #for partial effects plots
+library(emmeans)   #for estimating marginal means
+library(MASS)      #for glm.nb
+library(tidyverse) #for data wrangling
+library(brms)
+library(tidybayes)
+library(bayesplot)
+library(broom.mixed)
+library(rstan)
+library(patchwork)
+library(modelsummary)
+library(DHARMa)
+source('helperFunctions.R')
+```
+
+<!-- START_PRIVATE-->
+
+# Original data
+
+```{r readDataP, results='markdown', eval=FALSE}
+ltmp <- read_csv(file='../data/ltmp.csv')
+glimpse(ltmp)
+```
+
+# Data processing
+
+- Make a categorical version of Year
+- Combine Scores 4 and 5 into a single Score of 4 to be consistent across years
+- Make Score an ordered categorical variable
+- Generate a numeric version of categorical Score (as required for the `ocat` family.  Note this must be a 1 indexed numeric.
+- Relevel Sector such that it is in the order North, Central, South
+- Ensure that there is a categorical version of Reef
+- Generate a numeric version of the categorical Reef
+
+
+```{r processDataP, results='markdown', eval=FALSE}
+coral_fams <- ltmp |>
+    filter(HC>0) |>
+    pull(FAMILY_2021) |>
+    unique()
+ltmp <- ltmp |>
+  filter(FAMILY_2021 %in% coral_fams) |>
+  dplyr::rename(P_CODE = P_CODE.y) |>
+  distinct() |>
+  group_by(P_CODE, AIMS_REEF_NAME, REPORT_YEAR, SITE_NO, TRANSECT_NO) |>
+  summarise(
+    HC = sum(HC, na.rm = TRUE),
+    n.points = sum(n.points),
+    total.points = unique(total.points)
+  ) |>
+  ungroup() |>
+  dplyr::select(AIMS_REEF_NAME, REPORT_YEAR, SITE_NO, TRANSECT_NO, HC, n.points, total.points) |>
+  filter(!is.na(AIMS_REEF_NAME)) |>
+  droplevels()
+write_csv(ltmp, file='../data/ltmp.csv')
+rm("ltmp")
+gc()
+```
+
+<!-- END_PRIVATE-->
+
+# Scenario
+
+For over 35 years, the AIMS long term monitoring program has performed
+benthic surveys of coral reefs on the Great Barrier Reef (GBR). To do
+so the team uses two main survey techniques 1) Manta Tow and 2) Photo
+transects. The current example focuses on data collected using the
+later technique.
+Within each reef, there are three sites on the north east flank and
+within each site there are five permanent transects. Every year, the
+team return and take photos every meter along the transects. Once back
+in the laboratory, five points from every photo are scored according
+to what is represented underneath the point.
+
+The main objective of long-term monitoring is to be able to report on
+status and trends. Specifically, what is the status of each major
+benthic group (such as hard coral, soft coral and macroalgae) and how
+are they changing (particularly in response to major disturbances).
+
+For this example, we will focus on a single reef (Agincourt Reef
+No.1).
+
+# Read in the data
+
+```{r readData, results='markdown', eval=TRUE}
+ltmp <- read_csv('../data/ltmp.csv', trim_ws=TRUE)
+glimpse(ltmp)
+```
+
+| AIMS_REEF_NAME | REPORT_YEAR | SITE_NO | TRANSECT_NO | HC   | n.points | total.points |
+|----------------|-------------|---------|-------------|------|----------|--------------|
+| Arlington Reef | 2006        | 1       | 1           | 10.0 | 20       | 200          |
+| Arlington Reef | 2006        | 1       | 2           | 10.5 | 21       | 200          |
+|                |             |         |             |      |          |              |
+
+<!-- START_PRIVATE-->
+::: {.panel-tabset}
+
+## glimpse
+```{r}
+#| label: examinData
+glimpse(ltmp)
+```
+
+## head
+```{r}
+## Explore the first 6 rows of the data
+head(ltmp)
+```
+
+## str
+```{r}
+str(ltmp)
+```
+
+## Easystats (datawizard)
+```{r}
+ltmp |> datawizard::data_codebook()
+```
+
+## Skim (modelsummary)
+```{r}
+ltmp |> modelsummary::datasummary_skim(by = "SITE_NO")
+```
+
+:::
+<!-- END_PRIVATE-->
+
+# Data preparation
+
+<!-- START_PRIVATE-->
+
+- restrict to a single reef (Agincourt Reef No.1)
+- declare categorical variables as factors (this includes REPORT_YEAR)
+- declare random effects as factors
+- create unit names for sites and transects
+
+```{r processData, results='markdown', eval=TRUE, mhidden=TRUE}
+ltmp_sub <- ltmp |>
+    filter(AIMS_REEF_NAME == "Agincourt Reef No.1") |>
+    droplevels() |>
+    mutate(
+        REEF_SITE = factor(paste(AIMS_REEF_NAME, SITE_NO)),
+        REEF_SITE_TRANSECT = factor(paste(REEF_SITE, TRANSECT_NO)),
+        fREPORT_YEAR = factor(REPORT_YEAR)
+    )
+```
+<!-- END_PRIVATE-->
+
+# Exploratory Data Analysis
+
+
+<!-- START_PRIVATE-->
+::: {.panel-tabset}
+
+## Violin plots
+
+```{r EDA2b, results='markdown', eval=TRUE, fig.width=12, fig.height=5, mhidden=TRUE}
+
+ltmp_sub |>
+    ggplot(aes(y = HC, x = REPORT_YEAR)) +
+  geom_point()
+
+ltmp_sub |>
+    ggplot(aes(y = HC, x = REPORT_YEAR)) +
+    geom_line(aes(group = REEF_SITE_TRANSECT, colour = REEF_SITE)) +
+  geom_point()
+
+give.n <- function(val, ypos){
+  return(data.frame(y = ypos, label = round(mean(val), 1)))
+  }
+ltmp_sub |>
+    ggplot(aes(y = HC, x = factor(REPORT_YEAR))) +
+    geom_violin(fill = "orange") +
+    geom_line(aes(group = REEF_SITE_TRANSECT), alpha = 0.2) +
+    geom_point() +
+    stat_summary(
+      geom = "text",
+        aes(y = total.points, ymax =HC),
+      fun.data = give.n,
+        fun.args = list(ypos = 0)
+    )
+    ##   fun = mean, aes(y = total.points)
+    ## )
+```
+
+Based on this, it might be better to use the most recent year as the reference...
+
+```{r processData2, results='markdown', eval=TRUE, mhidden=TRUE}
+ltmp_sub <- ltmp_sub |>
+    mutate(
+        fREPORT_YEAR = factor(REPORT_YEAR, levels = rev(levels(fREPORT_YEAR)))
+    )
+```
+:::
+<!-- END_PRIVATE-->
+
+# Fit the model
+
+::: {.panel-tabset}
+
+<!-- START_PRIVATE-->
+## brms
+:::: {.panel-tabset}
+
+
+### Using default priors
+
+In `brms`, the default priors are designed to be weakly informative.  They are
+chosen to provide moderate regularisation (to help prevent over fitting) and
+help stabilise the computations.
+
+Unlike `rstanarm`, `brms` models must be compiled before they start sampling.
+For most models, the compilation of the stan code takes around 45 seconds.
+
+```{r fitModel2a, results='markdown', eval=TRUE, cache=TRUE, paged.print=FALSE, tidy.opts = list(width.cutoff = 80)}
+ltmp_sub_form <- bf(n.points | trials(total.points) ~ fREPORT_YEAR +
+        (1 | REEF_SITE) + (1 | REEF_SITE_TRANSECT),
+    family = binomial(link = "logit")
+)
+## ltmp_sub_form <- bf(n.points | trials(total.points) ~ fREPORT_YEAR +
+##         (1 | REEF_SITE / REEF_SITE_TRANSECT),
+##     family = binomial(link = "logit")
+## )
+options(width=150)
+get_prior(ltmp_sub_form, data = ltmp_sub)
+options(width=80)
+```
+
+
+### Defining priors
+
+The following link provides some guidance about defining priors.
+[https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations]
+
+When defining our own priors, we typically do not want them to be scaled.
+
+```{r fitModel2h, results='markdown', eval=TRUE, cache=FALSE}
+ltmp_sub |>
+    group_by(fREPORT_YEAR) |>
+    summarise(
+        Median = median(qlogis(n.points / total.points)),
+        MAD = mad(qlogis(n.points / total.points))
+    )
+```
+
+```{r fitModel2h1, results='markdown', eval=TRUE, cache=TRUE}
+priors <- prior(normal(-0.75, 0.3), class = 'Intercept') +
+    prior(normal(0, 2), class = 'b') +
+    prior(student_t(3, 0, 0.4), class = 'sd')
+ltmp_sub_form <- bf(
+    n.points | trials(total.points) ~ fREPORT_YEAR +
+        (1 | REEF_SITE) + (1 | REEF_SITE_TRANSECT),
+    family = binomial(link = "logit")
+)
+ltmp_sub_brm1a <- brm(ltmp_sub_form,
+                  data = ltmp_sub,
+                  prior = priors,
+                  sample_prior = 'only',
+                  iter = 3000,
+                  warmup = 1000,
+                  chains = 3, cores = 3,
+                  thin = 10,
+                  refresh = 0,
+                  seed = 123,
+                  control = list(adapt_delta = 0.99),
+                  backend = "cmdstanr"
+                  )
+
+```
+
+```{r partialPlot2h1a, results='markdown', eval=TRUE, fig.width=8, fig.height=5}
+ltmp_sub_brm1a |>
+  conditional_effects() |>
+  plot(points = TRUE)
+ltmp_sub_brm1a |>
+  conditional_effects(conditions = data.frame(total.points = 200)) |>
+  plot(points = TRUE)
+
+ltmp_sub_brm1a |>
+  conditional_effects(conditions = data.frame(total.points = 200)) |>
+  plot()
+```
+
+The above seem sufficiently wide whilst at the same time not providing any encouragement for the sampler
+to wander off into very unsupported areas.
+
+The following takes approx 500 seconds
+
+```{r fitModel2h1b, results='markdown', eval=TRUE, cache=TRUE}
+ltmp_sub_brm1b <- update(ltmp_sub_brm1a,
+  sample_prior = 'yes',
+  chains = 3, cores = 3,
+  control = list(adapt_delta = 0.99, max_treedepth = 20),
+  seed = 123,
+  refresh = 100)
+
+```
+
+```{r partialPlot2h1b, results='markdown', eval=TRUE, fig.width=8, fig.height=5}
+ltmp_sub_brm1b |>
+  conditional_effects(conditions = data.frame(total.points = 200)) |>
+  plot(points = TRUE)
+```
+
+### Plotting prior and posterior
+
+```{r posterior2h2, results='markdown', eval=TRUE}
+ltmp_sub_brm1b |> get_variables()
+ltmp_sub_brm1b |> hypothesis('fREPORT_YEAR2021=0') |> plot()
+ltmp_sub_brm1b |> hypothesis('Intercept=0') |> plot()
+ltmp_sub_brm1b |> hypothesis('sd_REEF_SITE__Intercept=0', class = "") |> plot()
+```
+
+```{r posterior2h2a, results='markdown', eval=TRUE, fig.width = 7, fig.height = 5}
+## ltmp_sub_brm1b %>% SUYR_prior_and_posterior()
+```
+
+
+::::
+
+<!-- END_PRIVATE-->
+
+:::
+
+# MCMC sampling diagnostics
+
+::: {.panel-tabset}
+
+<!-- START_PRIVATE-->
+
+In addition to the regular model diagnostics checking, for Bayesian analyses, it
+is also necessary to explore the MCMC sampling diagnostics to be sure that the
+chains are well mixed and have converged on a stable posterior.
+
+There are a wide variety of tests that range from the big picture, overall chain
+characteristics to the very specific detailed tests that allow the experienced
+modeller to drill down to the very fine details of the chain behaviour.
+Furthermore, there are a multitude of packages and approaches for exploring
+these diagnostics.
+
+## brms
+
+:::: {.panel-tabset}
+
+
+### bayesplot
+
+The `bayesplot` package offers a range of MCMC diagnostics as well as Posterior
+Probability Checks (PPC), all of which have a convenient `plot()` interface.
+Lets start with the MCMC diagnostics.
+
+<details><summary>See list of available diagnostics by name</summary>
+```{r modelValidation2a, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+available_mcmc()
+```
+</details>
+
+Of these, we will focus on:
+
+- trace: this plots the estimates of each parameter over the post-warmup
+  length of each MCMC chain.  Each chain is plotted in a different shade of
+  blue, with each parameter in its own facet.  Ideally, each **trace** should
+  just look like noise without any discernible drift and each of the traces for
+  a specific parameter should look the same (i.e, should not be displaced above
+  or below any other trace for that parameter).
+
+```{r modelValidation2b, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+pars <- ltmp_sub_brm1b |>
+    get_variables() |>
+    str_subset("^b_.*|^sd.*")
+pars
+ltmp_sub_brm1b |> mcmc_plot(type='trace', variable = pars)
+```
+
+   The chains appear well mixed and very similar
+
+- acf_bar (autocorrelation function): plots the autocorrelation between successive
+  MCMC sample lags for each parameter and each chain
+
+```{r modelValidation2c, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b |> mcmc_plot(type='acf_bar', variable = pars)
+```
+
+   There is no evidence of auto-correlation in the MCMC samples
+
+- rhat_hist: Rhat is a **scale reduction factor** measure of convergence between the chains.  The closer the
+  values are to 1, the more the chains have converged.  Values greater than 1.05
+  indicate a lack of convergence.  There will be an Rhat value for each
+  parameter estimated.
+
+```{r modelValidation2d, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b |> mcmc_plot(type='rhat_hist')
+```
+
+  All Rhat values are below 1.05, suggesting the chains have converged.
+
+- neff_hist (number of effective samples): the ratio of the number of effective
+  samples (those not rejected by the sampler) to the number of samples provides
+  an indication of the effectiveness (and efficiency) of the MCMC sampler.
+  Ratios that are less than 0.5 for a parameter suggest that the sampler spent
+  considerable time in difficult areas of the sampling domain and rejected more
+  than half of the samples (replacing them with the previous effective sample).
+
+  If the ratios are low, tightening the priors may help.
+
+```{r modelValidation2e, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1a |> mcmc_plot(type='neff_hist')
+```
+
+  Ratios all very high.
+
+<details><summary>More diagnostics</summary>
+```{r modelValidation2f, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b |> mcmc_plot(type='combo', variable = pars)
+ltmp_sub_brm1b |> mcmc_plot(type='violin', variable = pars)
+```
+</details>
+
+
+### stan plots
+
+The `rstan` package offers a range of MCMC diagnostics.
+Lets start with the MCMC diagnostics.
+
+Of these, we will focus on:
+
+- stan_trace: this plots the estimates of each parameter over the post-warmup
+  length of each MCMC chain. Each chain is plotted in a different colour, with
+  each parameter in its own facet. Ideally, each **trace** should just look like
+  noise without any discernible drift and each of the traces for a specific
+  parameter should look the same (i.e, should not be displaced above or below
+  any other trace for that parameter).
+
+```{r modelValidation2g, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+pars <- ltmp_sub_brm1b |>
+    get_variables() |>
+    str_subset("^b_.*|^sd.*")
+pars
+ltmp_sub_brm1b$fit |>
+    stan_trace(pars = pars)
+```
+
+   The chains appear well mixed and very similar
+
+- stan_acf (auto-correlation function): plots the auto-correlation between successive
+  MCMC sample lags for each parameter and each chain
+
+```{r modelValidation2h, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b$fit |>
+    stan_ac(pars = pars)
+```
+
+   There is no evidence of auto-correlation in the MCMC samples
+
+- stan_rhat: Rhat is a **scale reduction factor** measure of convergence between the chains.  The closer the
+  values are to 1, the more the chains have converged.  Values greater than 1.05
+  indicate a lack of convergence.  There will be an Rhat value for each
+  parameter estimated.
+
+```{r modelValidation2i, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b$fit |> stan_rhat()
+```
+
+  All Rhat values are below 1.05, suggesting the chains have converged.
+
+- stan_ess (number of effective samples): the ratio of the number of effective
+  samples (those not rejected by the sampler) to the number of samples provides
+  an indication of the effectiveness (and efficiency) of the MCMC sampler.
+  Ratios that are less than 0.5 for a parameter suggest that the sampler spent
+  considerable time in difficult areas of the sampling domain and rejected more
+  than half of the samples (replacing them with the previous effective sample).
+
+  If the ratios are low, tightening the priors may help.
+
+```{r modelValidation2j, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b$fit |> stan_ess()
+```
+
+  Ratios all very high.
+
+```{r modelValidation2k, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b$fit |>
+    stan_dens(separate_chains = TRUE, pars = pars)
+```
+
+::::
+
+<!-- END_PRIVATE-->
+
+:::
+
+# Model validation
+
+::: {.panel-tabset}
+
+<!-- START_PRIVATE-->
+## brms
+
+:::: {.panel-tabset}
+
+### pp check
+Post predictive checks provide additional diagnostics about the fit of the
+model.  Specifically, they provide a comparison between predictions drawn from
+the model and the observed data used to train the model.
+
+<details><summary>See list of available diagnostics by name</summary>
+```{r modelValidation5a, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+available_ppc()
+```
+</details>
+
+- dens_overlay: plots the density distribution of the observed data (black line)
+overlayed on top of 50 density distributions generated from draws from the model
+(light blue).  Ideally, the 50 realisations should be roughly consistent with
+the observed data.
+
+```{r modelValidation5b, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b |> pp_check(type = 'dens_overlay', ndraws = 100)
+```
+The model draws appear to be consistent with the observed data.
+
+- error_scatter_avg: this plots the observed values against the average
+  residuals. Similar to a residual plot, we do not want to see any patterns in
+  this plot.  Note, this is not really that useful for models that involve a
+  binomial response
+
+```{r modelValidation5c, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+## ltmp_sub_brm1b %>% pp_check(type = 'error_scatter_avg')
+```
+
+This is not really interpretable
+
+- intervals:  plots the observed data overlayed on top of posterior predictions
+associated with each level of the predictor.  Ideally, the observed data should
+all fall within the predictive intervals.
+
+
+```{r modelValidation5e, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm1b %>% pp_check(group = 'REEF', type = 'intervals')
+```
+
+The `shinystan` package allows the full suite of MCMC diagnostics and posterior
+predictive checks to be accessed via a web interface.
+
+```{r modelValidation5g, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+#library(shinystan)
+#launch_shinystan(ltmp_sub_brm1b)
+```
+
+### DHARMa residuals
+
+DHARMa residuals provide very useful diagnostics.  Unfortunately, we cannot
+directly use the `simulateResiduals()` function to generate the simulated
+residuals.  However, if we are willing to calculate some of the components
+yourself, we can still obtain the simulated residuals from the fitted stan model.
+
+We need to supply:
+
+- simulated (predicted) responses associated with each observation.
+- observed values
+- fitted (predicted) responses (averaged) associated with each observation
+
+
+```{r modelValidation6aa, results='markdown', eval=TRUE, fig.width=8, fig.height=10}
+
+ltmp_sub_resids <- make_brms_dharma_res(ltmp_sub_brm1b, integerResponse = TRUE)
+wrap_elements(~testUniformity(ltmp_sub_resids)) +
+               wrap_elements(~plotResiduals(ltmp_sub_resids, form = factor(rep(1, nrow(ltmp_sub))))) +
+               wrap_elements(~plotResiduals(ltmp_sub_resids, quantreg = TRUE)) +
+               wrap_elements(~testDispersion(ltmp_sub_resids))
+```
+
+```{r modelValidation6aaa, results='markdown', eval=TRUE, fig.width=8, fig.height=10}
+resids2 <- recalculateResiduals(ltmp_sub_resids, group = unique(ltmp_sub$fREPORT_YEAR))
+testTemporalAutocorrelation(resids2, time = unique(ltmp_sub$fREPORT_YEAR))
+
+library(geoR)
+autocor_check(ltmp_sub, ltmp_sub_brm1b, variable =  "fREPORT_YEAR", n.sim =  250)
+
+
+```
+::::
+<!-- END_PRIVATE-->
+
+:::
+
+# Model investigation
+
+::: {.panel-tabset}
+
+<!-- START_PRIVATE-->
+
+## brms
+
+:::: {.panel-tabset}
+
+`brms` captures the MCMC samples from `stan` within the returned list.
+There are numerous ways to retrieve and summarise these samples.  The first
+three provide convenient numeric summaries from which you can draw conclusions,
+the last four provide ways of obtaining the full posteriors.
+
+### summary
+
+The `summary()` method generates simple summaries (mean, standard deviation as
+well as 10, 50 and 90 percentiles).
+
+```{r summariseModel2a, results='markdown', eval=TRUE, fig.width=8, fig.height=5}
+ltmp_sub_brm1b %>% summary()
+```
+
+```{r summariseModel2a1, results='markdown', eval=TRUE, fig.width=8, fig.height=5, echo=FALSE}
+ltmp_sub_sum <- summary(ltmp_sub_brm1b)
+```
+
+### as_draws_df (posteriors)
+
+```{r summariseModel2bm, results='markdown', eval=TRUE, fig.width=8, fig.height=5,echo=TRUE}
+ltmp_sub_brm1b |> as_draws_df()
+ltmp_sub_brm1b |>
+    as_draws_df() |>
+    dplyr::select(matches("^b_.*|^sd_.*")) |>
+    mutate(Intercept = plogis(b_Intercept)) |>
+    mutate(across(matches("b_.*"), exp)) |>
+    summarise_draws(
+        median,
+        HDInterval::hdi,
+        Pl = ~ mean(.x < 1),
+        Pg = ~ mean(.x > 1),
+        rhat,
+        ess_bulk
+    ) |>
+  as.data.frame()
+```
+
+### $R^2$
+
+```{r summariseModel2g, results='markdown', eval=TRUE, fig.width=8, fig.height=5}
+ltmp_sub_brm1b |>
+    bayes_R2(re.form = NA, summary=FALSE) |>
+    median_hdci()
+ltmp_sub_brm1b |>
+    bayes_R2(re.form = ~(1|REEF_SITE), summary=FALSE) |>
+    median_hdci()
+ltmp_sub_brm1b |>
+    bayes_R2(re.form = ~(1|REEF_SITE) + (1| REEF_SITE_TRANSECT), summary=FALSE) |>
+    median_hdci()
+```
+
+::::
+
+<!-- END_PRIVATE-->
+
+:::
+
+
+# Further mnvestigations
+
+::: {.panel-tabset}
+
+<!-- START_PRIVATE-->
+
+## brms
+
+:::: {.panel-tabset}
+
+### Cellmeans
+
+Lets start by calculating the cell means
+```{r postHoc1a, results='markdown', eval=TRUE, echo=TRUE}
+ltmp_sub_brm1b |>
+    emmeans(~fREPORT_YEAR, type = "response") |>
+    as.data.frame() |>
+    mutate(
+        fREPORT_YEAR = factor(fREPORT_YEAR, levels = rev(levels(fREPORT_YEAR))),
+    ) |>
+    ggplot(aes(y = prob, x = as.numeric(as.character(fREPORT_YEAR)))) +
+    geom_ribbon(aes(ymin = lower.HPD, ymax = upper.HPD), fill = "orange", alpha = 0.3) +
+    geom_line() +
+    geom_point() +
+    theme_classic() +
+    scale_y_continuous("Live hard coral cover", label = scales::percent_format())
+
+
+
+```
+
+### Effects
+
+```{r postHoc1b, results='markdown', eval=TRUE, echo=TRUE, width = 10, height = 3}
+newdata <- list(fREPORT_YEAR = c(2011, 2012))
+ltmp_sub_brm1b |>
+  emmeans(~fREPORT_YEAR,
+    at = newdata,
+    type = "response"
+    )
+
+ltmp_sub_brm1b |>
+  emmeans(~fREPORT_YEAR,
+    at = newdata,
+    type = "response"
+  ) |>
+  pairs(reverse = TRUE)
+
+
+newdata <- list(fREPORT_YEAR = c(2000:2005, 2012:2013))
+cmat <- cbind(c(rep(1 / 6, 6), rep(-1 / 2, 2)))
+ltmp_sub_brm1b |>
+    emmeans(~fREPORT_YEAR,
+        at = newdata,
+        type = "response"
+    ) |>
+    regrid() |>
+  contrast(method = list(fREPORT_YEAR = cmat))
+
+
+
+ltmp_sub_brm1b |>
+    emmeans(~fREPORT_YEAR,
+        at = list(fREPORT_YEAR = c(2011, 2012)),
+        type = "link"
+    ) |>
+    pairs(reverse = TRUE) |>
+    tidy_draws() |>
+    exp() |>
+    summarise_draws(
+      median,
+      HDInterval::hdi,
+      Pl = ~ mean(.x < 1),
+      Pg = ~ mean(.x > 1)
+    )
+
+
+cmat <- cbind(c(rep(-1 / 7, 7), 1))
+ltmp_sub_brm1b |>
+    emmeans(~fREPORT_YEAR,
+        at = list(fREPORT_YEAR = c(1999:2005, 2012)),
+        type = "response"
+    ) |>
+    contrast(method = list(fREPORT_YEAR = cmat))
+
+
+ltmp_sub_brm1b |>
+    emmeans(~fREPORT_YEAR,
+        at = list(fREPORT_YEAR = c(1999:2005, 2012)),
+        type = "response"
+    ) |>
+    regrid() |>
+    contrast(method = list(fREPORT_YEAR = cmat))
+```
+
+::::
+
+<!-- END_PRIVATE-->
+:::
+
+
+# As a GAM
+
+<!-- START_PRIVATE-->
+
+sds- wiggliness parameter
+
+- sds(sx_1) is the sd of the smooth weights (spline coefficients).
+
+  - This determines the amount of ‘wiggliness’, and is analogous way
+    to how the sd of group-level effects in a varying slopes and
+    intercepts model determine the amount of variability among groups
+    in slopes and intercepts.
+  - However, the actual numeric value of the sds() is not very
+    practically interpretable, because thinking about the variance of
+    smooth weights for any given data and model seems abstract to me.
+  - However, if the value is around zero, then this is like
+    ‘complete-pooling’ of the basis functions, which means that there
+    isn’t much added value of more than a single basis function.
+
+- sx_1 is the unpenalized weight (ie coefficient) for one of the
+  “natural” parameterized basis functions.
+  - these are like betas,in that they are like a weight in the model (the influence of the spline)
+  - The rest of the basis functions are like varying effects.
+  - Again, because the actual numeric value of sxs_1 is the value for
+    the unpenalized coefficient for one of the basis functions.
+  - his wouldn’t seem to have a lot of practically interpretable
+    meaning just from viewing this number.
+
+::: {.panel-tabset}
+
+## Visualise basis functions
+
+```{r}
+#| label: visualise gam
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+gratia::basis(s(REPORT_YEAR),  data = ltmp_sub) |> gratia::draw()
+gratia::basis(s(REPORT_YEAR, bs='cr'),  data = ltmp_sub) |> gratia::draw()
+gratia::basis(s(REPORT_YEAR, bs='cc'),  data = ltmp_sub) |> gratia::draw()
+gratia::basis(s(REPORT_YEAR, bs='cr', k = 3),  data = ltmp_sub) |> gratia::draw()
+
+data.frame(mgcv::smoothCon(s(REPORT_YEAR), data = ltmp_sub)[[1]]$X) |>
+    head()
+## data.frame(mgcv::smoothCon(s(REPORT_YEAR, k=3),  data=ltmp_sub)[[1]]$REPORT_YEAR) |>
+##   bind_cols(ltmp_sub)
+```
+
+## Define formula and priors
+
+```{r}
+#| label: gam priors
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+ltmp_form <- bf(
+    n.points | trials(total.points) ~ s(REPORT_YEAR) +
+        (1 | REEF_SITE) + (1 | REEF_SITE_TRANSECT),
+    family = binomial(link = "logit")
+)
+get_prior(ltmp_form, data = ltmp_sub)
+
+## - b (beta) is the unpenalized weight (ie coefficient) for one of the
+##   “natural” parameterized basis functions.
+##   - these are like betas,in that they are like a weight in the model (the influence of the spline)
+##   - The rest of the basis functions are like varying effects.
+##   - Again, because the actual numeric value of sxs_1 is the value for
+##     the unpenalized coefficient for one of the basis functions.
+##   - his wouldn’t seem to have a lot of practically interpretable
+##     meaning just from viewing this number.
+
+## - sds is the sd of the smooth weights (spline coefficients).
+##   - This determines the amount of ‘wiggliness’, and is analogous way
+##     to how the sd of group-level effects in a varying slopes and
+##     intercepts model determine the amount of variability among groups
+##     in slopes and intercepts.
+##   - However, the actual numeric value of the sds() is not very
+##     practically interpretable, because thinking about the variance of
+##     smooth weights for any given data and model seems abstract to me.
+##   - However, if the value is around zero, then this is like
+##     ‘complete-pooling’ of the basis functions, which means that there
+##     isn’t much added value of more than a single basis function.
+
+ltmp_sub |>
+  summarise(
+    Median = median(qlogis(n.points / total.points)),
+    MAD = mad(qlogis(n.points / total.points))
+  )
+priors <- prior(normal(-1.1, 0.6), class = "Intercept") +
+  prior(normal(0, 1), class = 'b') +
+  prior(student_t(3, 0, 0.6), class = 'sd') +
+  prior(student_t(3, 0, 5), class = 'sds')
+```
+
+## Fit model
+
+```{r}
+#| label: gam fit model
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+ltmp_sub_brm2 <- brm(ltmp_form,
+  data = ltmp_sub,
+  prior = priors,
+  sample_prior = 'yes',
+  iter = 5000,
+  warmup = 1000,
+  chains = 3, cores = 3,
+  thin = 10,
+  refresh = 100,
+  seed = 123,
+  control = list(adapt_delta = 0.99, max_treedepth = 20),
+  backend = "cmdstanr"
+)
+
+```
+
+## Partial plots
+
+
+```{r}
+#| label: gam partial plots
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+ltmp_sub_brm2 |>
+  conditional_effects(conditions = data.frame(total.points = 200)) |>
+  plot(points = TRUE)
+ltmp_sub_brm2 |>
+  conditional_effects(conditions = data.frame(total.points = 1)) |>
+  plot(points = FALSE)
+```
+
+## MCMC sampling diagnostics
+
+```{r gam mcmc diagnostics 1, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+pars <- ltmp_sub_brm2 |>
+    get_variables() |>
+    str_subset("^b_.*|^sd.*")
+pars
+ltmp_sub_brm2$fit |>
+    stan_trace(pars = pars)
+```
+
+```{r gam mcmc diagnostics 2, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm2$fit |>
+    stan_ac(pars = pars)
+```
+
+```{r gam mcmc diagnostics 3, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm2$fit |> stan_rhat()
+```
+
+```{r gam mcmc diagnostics 4, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm2$fit |> stan_ess()
+```
+
+```{r gam mcmcm diagnostics 5, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm2$fit |>
+    stan_dens(separate_chains = TRUE, pars = pars)
+```
+
+## Model validation
+
+```{r gam model validation 1, results='markdown', eval=TRUE, fig.width=6, fig.height=4}
+ltmp_sub_brm2 |> pp_check(type = 'dens_overlay', ndraws = 100)
+```
+
+```{r gam model validation 2, results='markdown', eval=TRUE, fig.width=8, fig.height=10}
+ltmp_sub_resids <- make_brms_dharma_res(ltmp_sub_brm2, integerResponse = TRUE)
+wrap_elements(~testUniformity(ltmp_sub_resids)) +
+               wrap_elements(~plotResiduals(ltmp_sub_resids, form = factor(rep(1, nrow(ltmp_sub))))) +
+               wrap_elements(~plotResiduals(ltmp_sub_resids, quantreg = TRUE)) +
+               wrap_elements(~testDispersion(ltmp_sub_resids))
+```
+
+## Model investigation
+
+```{r}
+#| label: gam summary
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+
+ltmp_sub_brm2 |> summary()
+
+## sds- wiggliness parameter
+## - sds(sx_1) is the sd of the smooth weights (spline coefficients).
+
+##   - This determines the amount of ‘wiggliness’, and is analogous way
+##     to how the sd of group-level effects in a varying slopes and
+##     intercepts model determine the amount of variability among groups
+##     in slopes and intercepts.
+##   - However, the actual numeric value of the sds() is not very
+##     practically interpretable, because thinking about the variance of
+##     smooth weights for any given data and model seems abstract to me.
+##   - However, if the value is around zero, then this is like
+##     ‘complete-pooling’ of the basis functions, which means that there
+##     isn’t much added value of more than a single basis function.
+
+## - sx_1 is the unpenalized weight (ie coefficient) for one of the
+##   “natural” parameterized basis functions.
+##   - these are like betas,in that they are like a weight in the model (the influence of the spline)
+##   - The rest of the basis functions are like varying effects.
+##   - Again, because the actual numeric value of sxs_1 is the value for
+##     the unpenalized coefficient for one of the basis functions.
+##   - his wouldn’t seem to have a lot of practically interpretable
+##     meaning just from viewing this number.
+
+## Intercept - plogis(-1.08) = 0.253 (estimated coral cover at centered year)
+## sREPORT_YEAR_1 (spline coefficient) - purely internal coefficient for the spline basis function.  Not interpretable in itself.
+## sds(sREPORT_YEAR_1) - spline sd. degree of wiggliness - larger the value, more wiggly the spline.  This is a measure of how much the spline is allowed to vary.  If this is close to zero, then the spline is essentially flat (no wiggle).  If this is large, then the spline can wiggle a lot.
+
+## the temporal component is the dominant source of structural variation (3.75 vs 0.11 and 0.2)
+
+## The estimated mean proportion was 0.25 (95% CrI: 0.22-0.31). Temporal variation was strongly supported, with the spline smoothness parameter well above zero (sds = 3.75, 95% CrI: 2.25-6.34), indicating substantial non-linear change through time. Variability among reef sites was small and uncertain (SD = 0.11, 95% CrI: 0.00-0.44), whereas transects exhibited clearer heterogeneity (SD = 0.20, 95% CrI: 0.13-0.30).
+
+```
+
+## Summary figures
+
+```{r}
+#| label: gam figures
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+ltmp_glmm <- ltmp_sub_brm1b |>
+    emmeans(~fREPORT_YEAR, type = "response") |>
+    as.data.frame() |>
+    mutate(
+        fREPORT_YEAR = factor(fREPORT_YEAR, levels = rev(levels(fREPORT_YEAR))),
+        REPORT_YEAR = as.numeric(as.character(fREPORT_YEAR))
+    )
+
+ltmp_sub_brm2 |>
+  conditional_effects() |>
+  plot() |>
+  _[[1]] +
+  geom_line(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR), colour = "red") +
+  geom_ribbon(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR,
+      min = lower.HPD, ymax = upper.HPD), fill = "orange", alpha = 0.3) +
+  geom_point(data = ltmp_sub,
+    aes(y = n.points / total.points, x = REPORT_YEAR), inherit.aes = FALSE, alpha = 0.1) +
+  theme_classic() +
+  scale_y_continuous("Live hard coral cover", label = scales::percent_format())
+
+
+ltmp_sub_brm2 |>
+  conditional_effects(spaghetti = TRUE) |>
+  plot() |>
+  _[[1]] +
+  geom_line(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR), colour = "blue") +
+  geom_ribbon(data = ltmp_glmm, inherit.aes = FALSE,
+    aes(y = prob, x = REPORT_YEAR,
+      min = lower.HPD, ymax = upper.HPD), fill = "orange", alpha = 0.3) +
+  theme_classic() +
+  scale_y_continuous("Live hard coral cover", label = scales::percent_format())
+```
+
+:::
+
+<!-- END_PRIVATE-->
+
+```{r}
+#| label: as a gam
+#| results: markup
+#| eval: false
+#| echo: true
+#| cache: false
+
+
+
+ltmp_form <- bf(
+    n.points | trials(total.points) ~ gp(REPORT_YEAR) +
+        (1 | REEF_SITE) + (1 | REEF_SITE_TRANSECT),
+    family = binomial(link = "logit")
+)
+get_prior(ltmp_form, data = ltmp_sub)
+## we are not putting a prior on wiggliness directly.  Rather we are putting a prior on
+## GP hyperparameters.  The GP hyperparameters are the length scale and the standard deviation of the GP.  The length scale controls how quickly the GP can change (smaller values allow for more rapid changes), and the standard deviation controls how much variation there is in the GP.  We will put a prior on these hyperparameters.
+#- lscale: the length scale of the GP. Distance over which the GP function is correlated.  Smaller values allow for more rapid changes in the GP.  Larger values allow for smoother changes in the GP.
+#- sdgp: how much can the trend deviate from the intercept (on link scale)
+
+ltmp_sub |>
+    summarise(
+        Median = median(qlogis(HC/100)),
+        MAD = mad(qlogis(HC/100)),
+        N = mean(total.points)
+    )
+priors <- prior(normal(-1.1, 0.6), class = "Intercept") +
+  prior(student_t(3, 0, 0.6), class = "sd") +
+  prior(lognormal(log(5), 1), class = "lscale", coef = "gpREPORT_YEAR") +
+  prior(exponential(5), class = "lscale", coef = "gpREPORT_YEAR") +
+  prior(student_t(3, 0, 2), class = "sdgp")
+  ## prior(gamma(2, 0.1), class = "lscale")
+  ## prior(student_t(3, 0, 1/30), class = "lscale")
+  ## prior(lognormal(log(5), 0.7), class = "lscale", coef = "gpREPORT_YEAR")
+  ## prior(student_t(3, 0, 1), class = "lscale", coef = "gpREPORT_YEAR")
+ltmp_sub_brm5 <- brm(ltmp_form,
+                  data = ltmp_sub,
+                  prior = priors,
+                  sample_prior = 'yes',
+                  iter = 3000,
+                  warmup = 1000,
+                  chains = 3, cores = 3,
+                  thin = 10,
+                  refresh = 100,
+                  seed = 123,
+                  control = list(adapt_delta = 0.99, max_treedepth = 20),
+                  backend = "cmdstanr"
+                  )
+
+ltmp_sub_brm5 |>
+  conditional_effects(conditions = data.frame(total.points = 200)) |>
+  plot(points = TRUE)
+
+
+ltmp_sub_brm5 |> summary()
+
+newdata <- data.frame(
+  REPORT_YEAR = seq(1995, 2023, len = 100),
+  REEF_SITE = NA,
+  REEF_SITE_TRANSECT = NA,
+  total.points = 1
+)
+ltmp_sub_sum <-
+  ltmp_sub_brm5 |>
+    epred_draws(newdata = newdata, re_formula = NA) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ltmp_sub_sum |>
+  ggplot(aes(y = median, x = REPORT_YEAR)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "orange", alpha = 0.3) +
+  geom_line() +
+  geom_point(data = ltmp_sub,
+    aes(y = HC/100))
+
+
+ltmp_sub_brm5 |>
+  epred_draws(newdata = newdata, re_formula = NA) |>
+  ungroup() |>
+  dplyr::select(.draw, REPORT_YEAR, .epred) |>
+  ggplot(aes(y = .epred, x = REPORT_YEAR)) +
+  geom_line(aes(group = .draw), alpha = 0.1, colour = "orange") +
+  geom_line(data = ltmp_gp, inherit.aes = FALSE,
+    aes(y = median, x = REPORT_YEAR), colour = "white", linewidth = 2) +
+  geom_point(data = ltmp_sub,
+    aes(y = HC/100, x = REPORT_YEAR))
+
+
+forcast_newdata <- data.frame(
+  REPORT_YEAR = seq(2023, 2030, len = 100),
+  REEF_SITE = NA,
+  REEF_SITE_TRANSECT = NA,
+  total.points = 1
+)
+
+ltmp_sub_forcast_sum <-
+  ltmp_sub_brm5 |>
+    epred_draws(newdata = forcast_newdata, re_formula = NA) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ltmp_sub_sum |>
+    ggplot(aes(y = median, x = REPORT_YEAR)) +
+    geom_ribbon(aes(ymin = lower, ymax = upper), fill = "orange", alpha = 0.3) +
+    geom_line() +
+    geom_point(
+        data = ltmp_sub,
+        aes(y = HC / 100)
+    ) +
+  geom_ribbon(data = ltmp_sub_forcast_sum,
+    aes(ymin = lower, ymax = upper), fill = "red", alpha = 0.3) +
+  geom_line(data = ltmp_sub_forcast_sum)
+
+
+
+forcast <- ltmp_sub_brm5 |>
+    epred_draws(newdata = forcast_newdata, re_formula = NA) |>
+    ungroup() |>
+  dplyr::select(.draw, REPORT_YEAR, .epred)
+
+ltmp_sub_brm5 |>
+    epred_draws(newdata = newdata, re_formula = NA) |>
+    ungroup() |>
+    dplyr::select(.draw, REPORT_YEAR, .epred) |>
+    ggplot(aes(y = .epred, x = REPORT_YEAR)) +
+    geom_line(aes(group = .draw), alpha = 0.1, colour = "orange") +
+    geom_line(
+        data = ltmp_gp, inherit.aes = FALSE,
+        aes(y = median, x = REPORT_YEAR), colour = "white", linewidth = 2
+    ) +
+    geom_point(
+        data = ltmp_sub,
+        aes(y = HC / 100, x = REPORT_YEAR)
+    ) +
+  geom_line(data = forcast,
+    aes(group = .draw), alpha = 0.1, colour = "red")
+
+
+forcast_sum <- forcast |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ltmp_sub_brm5 |>
+    epred_draws(newdata = newdata, re_formula = NA) |>
+    ungroup() |>
+    dplyr::select(.draw, REPORT_YEAR, .epred) |>
+    ggplot(aes(y = .epred, x = REPORT_YEAR)) +
+    geom_line(aes(group = .draw), alpha = 0.1, colour = "orange") +
+    geom_line(
+        data = ltmp_gp, inherit.aes = FALSE,
+        aes(y = median, x = REPORT_YEAR), colour = "white", linewidth = 2
+    ) +
+    geom_point(
+        data = ltmp_sub,
+        aes(y = HC / 100, x = REPORT_YEAR)
+    ) +
+  geom_line(data = forcast,
+    aes(group = .draw), alpha = 0.1, colour = "red") +
+  geom_line(
+    data = forcast_sum, inherit.aes = FALSE,
+    aes(y = median, x = REPORT_YEAR), colour = "grey", linewidth = 2
+  )
+
+
+
+
+
+newdata <- data.frame(
+  REPORT_YEAR = c(1995, 2005),
+  REEF_SITE = NA,
+  REEF_SITE_TRANSECT = NA,
+  total.points = 1
+)
+ltmp_sub_sum <-
+  ltmp_sub_brm5 |>
+  epred_draws(newdata = newdata, re_formula = NA) |>
+  tidybayes::compare_levels(
+    var = .epred, by = REPORT_YEAR,
+    comparison = emmeans_comparison("revpairwise")
+  ) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+
+  ltmp_sub_brm5 |>
+  epred_draws(newdata = newdata, re_formula = NA) |>
+  mutate(.epred = log(.epred)) |>
+  tidybayes::compare_levels(
+    var = .epred, by = REPORT_YEAR,
+    comparison = emmeans_comparison("revpairwise")
+  ) |>
+  ungroup() |>
+  dplyr::select(REPORT_YEAR, .epred) |>
+  mutate(.epred = exp(.epred)) |>
+  group_by(REPORT_YEAR) |>
+  summarise_draws(median, HDInterval::hdi)
+
+```
