@@ -1114,9 +1114,7 @@ ltmp_sub_brm2 |>
 
 ::: {.panel-tabset}
 
-
 ## Define formula and priors
-
 
 Recommended rule of thumb
 
