@@ -1108,7 +1108,7 @@ ltmp_sub_brm2 |>
 
 <!-- END_PRIVATE-->
 
-## As a Gaussian Process
+# As a Gaussian Process
 
 <!-- START_PRIVATE-->
 
@@ -1116,6 +1116,56 @@ ltmp_sub_brm2 |>
 
 
 ## Define formula and priors
+
+
+Recommended rule of thumb
+
+For any predictor scaled to range from 0 to 1:
+
+Decide what fraction of the observed range represents the distance beyond which observations should be only weakly related.
+Define “weakly related” as correlation 0.10.
+Divide that distance by approximately 2.15.
+Thus:
+
+$$
+\boxed{ \text{lscale} \approx \frac{\text{distance where correlation becomes weak}}{2.15} }
+$$
+
+For instance:
+Plain Text
+
+- Weak correlation after 25% of range: lscale ≈ 0.25 / 2.15 = 0.12
+
+- Weak correlation after 50% of range: lscale ≈ 0.50 / 2.15 = 0.23
+
+- Weak correlation after 75% of range: lscale ≈ 0.75 / 2.15 = 0.35
+
+- Weak correlation after 100% of range: lscale ≈ 1.00 / 2.15 = 0.47
+
+This becomes the log mean of the lognormal prior
+
+Choosing the sd on lognormal
+
+Here is a useful guide:
+
+| Log-scale SD | Approximate 95% multiplicative range | If median is 0.23 |
+|--------------|--------------------------------------|-------------------|
+| 0.20         | divide/multiply by 1.48              | 0.155 to 0.341    |
+| 0.25         | divide/multiply by 1.63              | 0.141 to 0.375    |
+| 0.35         | divide/multiply by 1.99              | 0.116 to 0.458    |
+| 0.50         | divide/multiply by 2.66              | 0.086 to 0.613    |
+| 0.70         | divide/multiply by 3.94              | 0.058 to 0.906    |
+| 1.00         | divide/multiply by 7.10              | 0.032 to 1.633    |
+
+Thus:
+
+- 0.2 to 0.35 represents fairly strong prior knowledge
+- 0.5 represents moderate uncertainty
+- 0.7 allows considerable uncertainty
+- 1.0 is very broad and allows extremely small and large length scales
+
+
+
 
 ```{r}
 #| label: gp priors
@@ -1143,8 +1193,9 @@ ltmp_sub |>
 priors <- prior(normal(-1.1, 0.6), class = "Intercept") +
   prior(student_t(3, 0, 0.6), class = "sd") +
   ## prior(lognormal(log(5), 1), class = "lscale", coef = "gpREPORT_YEAR") +
-  prior(exponential(5), class = "lscale", coef = "gpREPORT_YEAR") +
-  prior(student_t(3, 0, 2), class = "sdgp")
+  prior(lognormal(log(0.35), 0.5), class = "lscale", coef = "gpREPORT_YEAR") +
+  ## prior(exponential(5), class = "lscale", coef = "gpREPORT_YEAR") +
+  prior(student_t(3, 0, 0.6), class = "sdgp")
 
 ```
 
@@ -1157,18 +1208,19 @@ priors <- prior(normal(-1.1, 0.6), class = "Intercept") +
 #| echo: true
 #| cache: true
 ltmp_sub_brm3 <- brm(ltmp_form,
-  data = ltmp_sub,
-  prior = priors,
-  sample_prior = 'yes',
-  iter = 3000,
-  warmup = 1000,
-  chains = 3, cores = 3,
-  thin = 10,
-  refresh = 100,
-  seed = 123,
-  control = list(adapt_delta = 0.99, max_treedepth = 20),
-  backend = "cmdstanr"
+    data = ltmp_sub,
+    prior = priors,
+    sample_prior = "yes",
+    iter = 3000,
+    warmup = 1000,
+    chains = 3, cores = 3,
+    thin = 10,
+    refresh = 100,
+    seed = 123,
+    control = list(adapt_delta = 0.99, max_treedepth = 20),
+    backend = "cmdstanr"
 )
+
 
 ```
 

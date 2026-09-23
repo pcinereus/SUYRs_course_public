@@ -1,5 +1,4 @@
 
-<!-- START_PRIVATE-->
 
 ---
 title: "Bayesian GLMM Part4"
