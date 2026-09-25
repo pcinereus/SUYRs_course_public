@@ -141,7 +141,14 @@ SUYR_prior_and_posterior <- function(mod) {
 
     ## splines
     wch.spl <- rhs[grep("s\\(", rhs)]
-    if (length(wch.spl)>0) f <- update(f, paste("~ . -", wch.spl))
+    if (length(wch.spl) > 0) {
+      f <- update(f, paste("~ . - ", paste(wch.spl, collapse = " - ")))
+    }
+    ## GP
+    wch.gp <- rhs[grep("gp\\(", rhs)]
+    if (length(wch.gp) > 0) {
+      f <- update(f, paste("~ . - ", paste(wch.gp, collapse = " - ")))
+    }
 
 
     Xmat <- model.matrix(f, dat)[,-1] %>%
@@ -197,7 +204,8 @@ SUYR_prior_and_posterior <- function(mod) {
     other.pars <- all.pars %>% str_subset("^Intercept$|^b_|^bs|^sds_", negate = TRUE)
     other.pars <- vars %>% str_subset(paste0("^", other.pars, collapse = '|'))
     spline.pars <- vars %>% str_subset("^bs_|^sds_")
-    pars <- c(fixed.pars, other.pars, spline.pars)
+    gp.pars <- vars %>% str_subset("^lscale_|^sdgp_")
+    pars <- unique(c(fixed.pars, other.pars, spline.pars, gp.pars))
 
     ## coefs <- prior_summary(mod)$class %>% unique()
     ## coefs.regex <- paste0("^b_", coefs, collapse = "|")
@@ -222,6 +230,16 @@ SUYR_prior_and_posterior <- function(mod) {
                Parameter = ifelse(Type == 'Posterior' & str_detect(Parameter, "sds_.*"),
                                    str_remove(Parameter, "_[0-9]$"),
                                   Parameter),
+               ## deal with awkward GP names
+               Parameter = ifelse(Type == 'Posterior' & str_detect(Parameter, "lscale_.*"),
+                                  str_remove(Parameter, "_[0-9]$"),
+                                  Parameter),
+               Parameter = ifelse(Type == 'Prior' & str_detect(Parameter, "lscale_.*"),
+                                  str_remove(Parameter, "__[0-9]"),
+                                  Parameter),
+                Parameter = ifelse(Type == 'Posterior' & str_detect(Parameter, "sdgp_.*"),
+                                    str_replace(Parameter, ".*", "sdgp"),
+                                    Parameter),
                ## Parameter = ifelse(Type == 'Posterior',
                ##                     str_remove(Parameter, "__.*"),
                ##                    Parameter),
@@ -592,4 +610,105 @@ recover_data.brmsfit <- function(object, data, ...) {
     trms <- attr(model.frame(bt$dpars$mu$fe, data = object$data), "terms")
     # we don't have a call component so I'll just put in NULL
     emmeans:::recover_data.call(NULL, trms, "na.omit", data = object$data, ...)
+}
+
+
+
+invgamma_from_weak_distance <- function(
+  lower_distance,
+  upper_distance,
+  weak_correlation = 0.10,
+  probability = 0.90
+) {
+
+  stopifnot(
+    lower_distance > 0,
+    upper_distance > lower_distance,
+    weak_correlation > 0,
+    weak_correlation < 1,
+    probability > 0,
+    probability < 1
+  )
+
+  # Equal-tail probabilities
+  p_lower <- (1 - probability) / 2
+  p_upper <- 1 - p_lower
+
+  # Convert ecological correlation distances to lscale
+  correlation_multiplier <- sqrt(
+    -2 * log(weak_correlation)
+  )
+
+  lower_lscale <- lower_distance /
+    correlation_multiplier
+
+  upper_lscale <- upper_distance /
+    correlation_multiplier
+
+  target_ratio <- upper_lscale / lower_lscale
+
+  # Solve for inverse-gamma shape
+  shape_equation <- function(shape) {
+
+    qgamma(
+      1 - p_lower,
+      shape = shape,
+      rate = 1
+    ) /
+      qgamma(
+        1 - p_upper,
+        shape = shape,
+        rate = 1
+      ) -
+      target_ratio
+  }
+
+  shape <- uniroot(
+    shape_equation,
+    interval = c(0.01, 1e5)
+  )$root
+
+  # Solve for inverse-gamma scale
+  scale <- lower_lscale * qgamma(
+    1 - p_lower,
+    shape = shape,
+    rate = 1
+  )
+
+  # Inverse-gamma quantile function
+  qinvgamma <- function(p) {
+    scale / qgamma(
+      1 - p,
+      shape = shape,
+      rate = 1
+    )
+  }
+
+  lscale_quantiles <- qinvgamma(
+    c(p_lower, 0.5, p_upper)
+  )
+
+  weak_distance_quantiles <-
+    correlation_multiplier *
+    lscale_quantiles
+
+  list(
+    shape = shape,
+    scale = scale,
+    weak_correlation = weak_correlation,
+    probability = probability,
+    lscale_quantiles = setNames(
+      lscale_quantiles,
+      c("lower", "median", "upper")
+    ),
+    weak_distance_quantiles = setNames(
+      weak_distance_quantiles,
+      c("lower", "median", "upper")
+    ),
+    prior = sprintf(
+      "inv_gamma(%.6f, %.6f)",
+      shape,
+      scale
+    )
+  )
 }
