@@ -1,9 +1,9 @@
 
 ---
-title: SUYRs worksheets 
+title: SUYRs worksheets
 author: "Murray Logan"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-format: 
+format:
   html:
     ## Format
     theme: [default, ../resources/ws-style.scss]
@@ -69,3 +69,12 @@ bibliography: ../resources/references.bib
 - [Hierarchical Gamma GLM with polynomials (bglmm_example7.html)](bglmm_example7.html)
 - [Hierarchical Ordinal GLM (bglmm_example9.html)](bglmm_example9.html)
 - [Hierarchical Binomial GLM (bglmm_example10.html)](bglmm_example10.html)
+
+## GAMs and GPs
+- [Simple GAM and GP (bgam_example1.html)](bgam_example1.html)
+- [Complex GAM and GP (bgam_example3.html)](bgam_example3.html)
+
+## Regression trees
+- [Simple boosted regression tree (tree_example1.html)](tree_example1.html)
+- [Binary boosted regression tree (tree_example2.html)](tree_example2.html)
+- [Boosted regression tree (tree_example3.html)](tree_example3.html)
