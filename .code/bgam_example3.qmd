@@ -1,0 +1,2723 @@
+
+---
+title: "Bayesian GAM Part3"
+author: "Murray Logan"
+date: today
+date-format: "DD/MM/YYYY"
+format:
+  html:
+    ## Format
+    theme: [default, ../resources/ws-style.scss]
+    css: ../resources/ws_style.css
+    html-math-method: mathjax
+    ## Table of contents
+    toc: true
+    toc-float: true
+    ## Numbering
+    number-sections: true
+    number-depth: 3
+    ## Layout
+    page-layout: full
+    fig-caption-location: "bottom"
+    fig-align: "center"
+    fig-width: 4
+    fig-height: 4
+    fig-dpi: 72
+    tbl-cap-location: top
+    ## Code
+    code-fold: false
+    code-tools: true
+    code-summary: "Show the code"
+    code-line-numbers: true
+    code-block-border-left: "#ccc"
+    code-copy: true
+    highlight-style: atom-one
+    ## Execution
+    execute:
+      echo: true
+      cache: true
+    ## Rendering
+    embed-resources: true
+crossref:
+  fig-title: '**Figure**'
+  fig-labels: arabic
+  tbl-title: '**Table**'
+  tbl-labels: arabic
+engine: knitr
+output_dir: "docs"
+documentclass: article
+fontsize: 12pt
+mainfont: Arial
+mathfont: LiberationMono
+monofont: DejaVu Sans Mono
+classoption: a4paper
+bibliography: ../resources/references.bib
+---
+
+```{r}
+#| label: setup
+#| include: false
+#| cache: false
+
+knitr::opts_chunk$set(cache.lazy = FALSE,
+                      tidy = "styler")
+options(tinytex.engine = "xelatex")
+```
+
+
+# Preparations
+
+Load the necessary libraries
+
+```{r}
+#| label: libraries
+#| output: false
+#| eval: true
+#| warning: false
+#| message: false
+#| cache: false
+library(tidyverse)  #for data wrangling etc
+library(cmdstanr)   #for cmdstan
+library(brms)       #for fitting models in STAN
+library(standist)   #for exploring distributions
+library(coda)       #for diagnostics
+library(bayesplot)  #for diagnostics
+library(ggmcmc)     #for MCMC diagnostics
+library(DHARMa)     #for residual diagnostics
+library(rstan)      #for interfacing with STAN
+library(emmeans)    #for marginal means etc
+library(broom)      #for tidying outputs
+library(tidybayes)  #for more tidying outputs
+library(HDInterval) #for HPD intervals
+library(ggeffects)  #for partial plots
+library(broom.mixed)#for summarising models
+library(posterior)  #for posterior draws
+library(ggeffects)  #for partial effects plots
+library(patchwork)  #for multi-panel figures
+library(bayestestR) #for ROPE
+library(see)        #for some plots
+library(easystats)     #framework for stats, modelling and visualisation
+library(mgcv)
+library(gratia)
+theme_set(theme_grey()) #put the default ggplot theme back
+source('helperFunctions.R')
+```
+
+
+# Scenario
+
+The Australian Institute of Marine Science (AIMS) have a long-term
+inshore marine water quality monitoring program in which water samples
+are collected and analysed from sites (reef.alias) across the GBR numerous times
+per year.  The focus of this program is to report long-term condition and change
+in water quality parameters.
+
+Although we do have latitude and longitudes, the nature of the spatial design
+predominantly reflects a series of transects that start near the mouth of a
+major river and extend northwards, yet mainly within the open coastal zone.  As
+a result, this design is not well suited to any specific spatial analyses (since
+they are mainly one dimensional).
+
+![AIMS water quality monitoring](../resources/AIMS_wq.jpg){#fig-aims width="600" height="325"}
+
+
+LATITUDE LONGITUDE reef.alias Water_Samples Region Subregion Season waterYear NOx
+-------- --------- ---------- ------------- ------ --------- ------ --------- ---
+-16.1    145.      Cape Trib… AIMS          Wet T… Barron D… Dry    2008      0.830
+-16.1    145.      Cape Trib… AIMS          Wet T… Barron D… Wet    2008      0.100
+-16.1    145.      Cape Trib… AIMS          Wet T… Barron D… Dry    2009      0.282
+-16.1    145.      Cape Trib… AIMS          Wet T… Barron D… Wet    2009      1.27
+-16.1    145.      Cape Trib… AIMS          Wet T… Barron D… Dry    2009      0.793
+-16.1    145.      Cape Trib… AIMS          Wet T… Barron D… Dry    2010      0.380
+\...     \...      \...       \...          \...   \...      \...   \...      \...
+
+: Format of aims.wq.csv data file {#tbl-aims .table-condensed}
+
+--------------     ---------------------------------------------------------------------
+**LATITUDE**       - Latitudinal coordinate
+**LONGITUDE**      - Longitudinal coordinate
+**reef.alias**     - Internal AIMS reef name
+**Water_Samples**  - Categorical label of who collected the data
+**Region**         - The MMP region
+**Subregion**      - The MMP subregion
+**Season**         - A categorical listing of Wet or Dry
+**waterYear**      - The water year (1st Oct - 30 Sept) to which the data are attached
+**Date**           - The date the sample was collected
+**Mnth**           - The month the sample was collected
+**NOx**            - Nitrite and Nitrate
+--------------     ---------------------------------------------------------------------
+
+: Description of the variables in the aims data file {#tbl-aims1 .table-condensed}
+
+# Read in the data
+
+```{r}
+#| label: readData
+#| cache: false
+wq <- read_csv("../data/aims_wq.csv", trim_ws = TRUE)
+```
+
+<!-- START_PRIVATE-->
+We will start by defining each of the categorical variables as factors.  We will
+also define the random effect (reef.alias) as a factor.
+
+```{r}
+#| label: prepareData
+#| cache: false
+wq <- wq |>
+    mutate(
+        Site = factor(Site),
+        Region = factor(Region),
+        Subregion = factor(Subregion),
+        Season = factor(Season)
+    )
+```
+
+
+
+<!-- END_PRIVATE-->
+
+# Exploratory data analysis
+
+Model formula:
+$$
+\begin{align}
+y_i &\sim{} \mathcal{N}(\mu_i, \sigma^2)\\
+\mu_i &=\beta_0 + f(Date_i) + f(Month_i)
+\end{align}
+$$
+
+where $\beta_0$ is the y-intercept. $f(Date)$ and $f(Month)$ indicate the additive smoothing functions of the long-term temporal trends and the annual seasonal trends respectively.
+
+<!-- START_PRIVATE-->
+If we begin with a quck scatterplot of NOx agains Date..
+
+```{r}
+#| label: EDA1a
+#| fig-width: 15
+#| fig-height: 12
+#| mhidden: true
+#| eval: true
+#| out-width: 800px
+#| warning: false
+#| message: false
+wq |> ggplot(aes(y = NOx, x = Date)) +
+    geom_point() +
+    scale_y_log10() +
+  facet_wrap(~ Region + Site, scales = "free_y") +
+  geom_smooth()
+```
+
+```{r}
+#| label: EDA1aa
+#| mhidden: true
+#| eval: true
+#| warning: false
+#| message: false
+wq |> ggplot(aes(y = NOx)) +
+    geom_boxplot()
+```
+
+We know that these NOx values have been measured over time from a number of
+locations (reef.alias).  Therefore, it would be good to facet the scatterplot
+conditional on the reef.alias.
+
+
+```{r}
+#| label: EDA1b
+#| eval: true
+#| mhidden: true
+#| fig-width: 15
+#| fig-height: 12
+#| out-width: 800px
+#| warning: false
+#| message: false
+ggplot(wq, aes(y = NOx, x = Date)) +
+    geom_point(aes(colour = Season)) +
+    geom_smooth() +
+    facet_wrap(~Region + Site, scales = 'free_y')
+```
+
+**Conclusions:**
+
+- evidently, some locations (reef.alias) have longer time series than others
+- the amount and variability of NOx also varies greatly between locations.
+- the temporal trends are clearly not linear and possibly more complex than
+  simple polynomials - it is likely that splines will be useful
+- assumptions of normality are difficult to assess, however it would seem
+  logical that the data will not follow a Gaussian distribution (since values
+  less than 0 are not possible and it does appear that there is a relationship
+  between mean and variance).
+- although not immediately obvious from some of the trends, the values
+  of NOx appear to be truncated at 0.01. Indeed the limit of detection
+  is 0.01 and thus values are capped at this value.
+
+```{r}
+#| label: EDA1c
+#| eval: true
+#| mhidden: true
+#| fig-width: 15
+#| fig-height: 12
+#| out-width: 800px
+#| warning: false
+#| message: false
+ggplot(wq, aes(y=NOx, x=Date)) +
+  geom_point() +
+  geom_smooth() +
+    scale_y_log10() +
+  scale_y_continuous(trans=scales::pseudo_log_trans()) +
+  facet_wrap(~Site,  scales='free_y')
+
+```
+
+**Conclusions:**
+
+- although the loess smoothers are not particularly appropriate for non-Gaussian
+  data, they nevertheless help us see that there are both similarities and
+  differnces in the trends between locations.   Most of the locations that have
+  a long time series show some sort of peak in NOx around about 2014
+
+
+<!-- END_PRIVATE-->
+
+# Data preparations
+
+<!-- START_PRIVATE-->
+
+Care must be taken when using dates in a model. This is because they
+are stored either as number of seconds or the number of days that have
+elapsed since a particular time. Typically, this means that they are
+stored as very large numbers and any calculations that involve large
+numbers can quickly become too large to handle efficiently. Hence, it
+is often a good idea to convert dates/times into simpler numeric
+representations. This can be performed with the `decimal_date()`
+function within the `lubridate` package.
+
+Although we generally want to scale any continuous predictors, it
+appears that doing so with Date objects has downstream issues - the
+models fit ok, but partial plots are displaced along the x-axis. So as
+an alternative either dont scale, or do so with a routine that does
+not automatically back-trasform (such as sjmisc::std or
+sjmisc::center).
+
+At this point, we can also add a predictor for month so as to
+facilitate models that will detrend a temporal series into long-terms
+and annual cycles. Furthermore, we will also establish a flag variable
+to handle the truncated limit of detection values. This latter
+variable will contain the string "left" for any value that is set to
+the limit of detection/reporting and "none" for all other values.
+
+```{r}
+#| label: prepareData2
+#| eval: true
+#| mhidden: true
+#| cache: false
+wq <-
+  wq |>
+    mutate(dt_num = lubridate::decimal_date(Date)) |>
+    mutate(Mnth = month(Date)) |>
+    mutate(NOx_flag = ifelse(NOx == 0.01, "left", "none"))
+```
+
+<!-- END_PRIVATE-->
+
+# Simple model (Double Island)
+
+
+## Date (Dt_num) only
+
+
+<!-- START_PRIVATE-->
+
+::: {.panel-tabset}
+
+When contemplating fitting a complex model, it is often good practice to build a
+model up, starting with something relatively simple.  That way, if the model
+fails or yeilds strange outcomes, it is easier to diagnose the issues.
+In the spirit of this, we will begin by building up a temporal model for a
+single reef (Pandora), before moving on to generalise across multiple reefs in a
+mixed effects model.
+
+
+### Exploratory data analysis
+
+
+```{r}
+#| label: model1a
+#| eval: true
+#| cache: false
+#| mhidden: true
+wq_sub <-
+  wq |>
+  filter(Site == "Double Island") |>
+  droplevels()
+
+wq_sub |>
+  ggplot(aes(y = NOx, x = Date)) +
+  geom_point(aes(colour = Season)) +
+  geom_smooth() +
+  scale_y_log10()
+
+wq_sub |>
+  filter(!is.na(NOx)) |>
+  ggplot(aes(y=NOx, x=Date)) +
+  geom_point() +
+  geom_smooth(method = 'gam', formula = y ~ s(x),
+    method.args = list(family = Gamma(link = "log")))
+
+wq_sub |>
+  pull(NOx) |>
+  summary()
+```
+
+**Conclusions:**
+
+- of concern in the above figure is the set of DOC values of 0.01 at the start
+  of the time series.  These values represent the limit of detection of the
+  instrumentation used for measuring DOC at the time.  Any value measured at
+  0.01 or less was just recorded as 0.01.
+- ideally, such cases should be modelled as censored so as to acknowledge that
+  they are at or below 0.01 and not exactly 0.01 (with no variation).
+  Unfortunately, this is not available with the `mgcv` package (or any
+  frequentist package for fitting GAM's that I am aware of).
+- options for dealing with such circumstances very much depend on the
+  reliability of these values.  If we believe that they are approximately
+  representative, we might elect to keep them in an model as normal.  On the
+  other hand, if the reliability of the measurements is questionable, we might
+  elect to exclude these values.
+- in the absence of any additional information about these observations, we will
+  keep them in.
+
+
+
+<!-- END_PRIVATE-->
+
+<!-- START_PRIVATE-->
+
+### GAM
+
+::::: {.panel-tabset}
+
+#### Assessing default priors
+
+```{r fitModel1a, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_form <- bf(NOx | cens(NOx_flag) ~
+                s(dt_num), family = Gamma(link = "log"))
+get_prior(wq_form, data =  wq_sub)
+
+wq_brm <- brm(wq_form,
+  data = wq_sub,
+  prior = prior(normal(0, 2.5), class = 'b'),
+  sample_prior = 'only',
+  iter = 5000,
+  warmup = 1000,
+  chains = 3,
+  thin = 5,
+  seed = 123,
+  backend = 'cmdstan',
+  refresh = 0)
+```
+
+##### conditional_effects
+
+```{r fitModel1d2, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm |> conditional_effects() |>
+  plot(points=TRUE) |>
+  scale_y_log10()
+```
+
+
+#### Defining priors
+
+The following link provides some guidance about defining priors.
+[https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations]
+
+
+::::: {.panel-tabset}
+
+##### About priors
+
+I will also overlay the raw data for comparison.
+
+sds- wiggliness parameter
+
+A model such as
+
+`y ~ s(scale(x))`
+
+represents the relationship between `x` and `y` using a set of spline
+basis functions:
+
+$$
+f(x)=\sum_{k=1}^{K} b_k B_k(x)
+$$
+
+In `brms`, the spline is separated into:
+
+- b: unpenalised components, including the broad linear trend
+
+- sds: the standard deviation of the penalised spline coefficients,
+  controlling departures from that trend
+
+Conceptually, the penalised coefficients have a prior of the form
+$$
+b_k^{\mathrm{smooth}} \sim \operatorname{Normal}(0,\sigma_s)
+$$
+
+where $\sigma_s$ is reported as `sds`.
+
+###### Prior for b
+
+The `b` prior controls the size of the broad change in the response
+associated with the scaled predictor:
+
+- a prior concentrated near zero favours a weak overall relationship
+- a wider prior permits a stronger overall trend
+
+Because `scale(x)` gives `x` mean zero and standard deviation one, `b`
+can be interpreted approximately as the expected change in the linear
+component of the response for a one-standard-deviation change in `x`.
+
+Choose the prior using plausible effect sizes on the response scale. For example, if both `x` and `y` are standardised:
+
+`prior(normal(0, 1), class = "b")` allows substantial positive or
+negative effects while mildly discouraging extremely large
+relationships.
+
+If `y` is not standardised, select the prior scale in meaningful units of `y`. For example:
+
+`prior(normal(0, 5), class = "b")`
+
+says that changes of several response units per standard deviation of `x` are plausible.
+
+
+###### Prior for sds
+
+The `sds` parameter controls the complexity of the smooth:
+
+- sds near zero favours an approximately linear relationship
+
+- small sds permits gentle curvature
+
+- large sds permits increasingly complex or wiggly relationships
+
+Because sds must be positive, suitable weakly informative priors include half-normal, half-Student-ttt, and exponential distributions. For a standardised response, reasonable starting points are:
+
+`prior(normal(0, 0.5), class = "sds")`
+
+or, more permissively:
+
+`prior(student_t(3, 0, 1), class = "sds")`
+
+`brms` automatically constrains `sds` to be positive, so these become half-normal or half-Student-t priors.
+
+A useful interpretation is:
+
+- The prior on `sds` expresses how strongly we expect the relationship to depart from a straight line.
+
+Note, `sds` does not correspond to a particular distance along `x`. Its effect depends on the spline basis dimension and the observed predictor values. It should therefore be checked using prior predictive smooths.
+
+Practical guidelines:
+
+| Prior choice               | Interpretation                                        |
+|----------------------------|-------------------------------------------------------|
+| Narrower prior on b        | Stronger belief that the overall relationship is weak |
+| Wider prior on b           | Allows a larger overall effect                        |
+|----------------------------|-------------------------------------------------------|
+| sds concentrated near zero | Favours an approximately linear relationship          |
+| Moderate prior on sds      | Allows smooth curvature                               |
+| Very broad prior on sds    | Allows complex curves and may overfit sparse data     |
+
+
+##### Sample prior only
+
+```{r fitModel2aaa, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_form <- bf(NOx | cens(NOx_flag) ~ s(scale(dt_num)), family = Gamma(link = "log"))
+
+wq_sub |> summarise(
+  median(log(NOx)),
+  mad(log(NOx)),
+  mad(log(NOx)) / mad(scale(dt_num))
+)
+get_prior(wq_form, data = wq_sub)
+priors <- prior(normal(-3.1, 1),  class='Intercept') +
+  prior(normal(0, 10), class='b') +
+  prior(gamma(0.01, 0.01),  class='shape') +
+  prior(student_t(3, 0, 10), class =  "sds")
+
+wq_brm1 <- brm(wq_form,
+                 data = wq_sub,
+                 prior = priors,
+                 sample_prior = 'only',
+                 iter = 3000,
+                 warmup = 1000,
+                 thin = 5,
+                 chains = 3, cores =  3,
+                 backend = 'cmdstanr',
+                 seed =  123,
+                 control =  list(adapt_delta = 0.99, max_treedepth = 20),
+                 refresh = 0)
+```
+
+```{r fitModel2b, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm1 |> conditional_effects() |>  plot(points=TRUE)
+wq_brm1 |> conditional_effects() |>  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10()
+
+wq_brm1 |> conditional_effects() |>
+  ## plot(points=TRUE, point_args = list(colour = "red", size = 4)) |>
+  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10() +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num))
+```
+
+##### Sample prior and posterior
+
+```{r fitModel2caa, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_brm2 <- update(wq_brm1, sample_prior = "yes", cores =  3, seed = 123, refresh =  0)
+```
+
+```{r fitModel2d, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm2 |> conditional_effects() |>  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10()
+
+wq_brm2 |> conditional_effects() |>
+  plot(points=TRUE, point_args = list(colour = "red", size = 4)) |>
+  _[[1]] +
+  scale_y_log10() +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num))
+wq_brm2 |> SUYR_prior_and_posterior()
+```
+
+
+
+```{r fitModel2da, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm2 |> conditional_effects(spaghetti = TRUE, ndraws =  250) |>  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10() +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num))
+
+
+wq_brm2 |> conditional_effects() |>
+  plot(points=TRUE, point_args = list(colour = "red", size = 4)) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num))
+
+
+## semi-manual plot
+wq_brm2 |>
+    conditional_effects(spaghetti = TRUE, ndraws = 250) |>
+  as_draws_df() |>
+  mutate(across(c(dt_num, estimate__, lower__, upper__), as.numeric)) |>
+  mutate(Date =  lubridate::date_decimal(dt_num)) |>
+  ggplot(aes(x = as.Date(Date), y = estimate__)) +
+  geom_ribbon(aes(ymin = lower__, ymax = upper__), fill = "orange", alpha = 0.3) +
+  geom_line() +
+  scale_y_continuous("Estimated NOx (µM)") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  theme_bw()
+
+
+# semi-manual spaghetti plot
+newdata <- with(wq_sub, tibble(dt_num = seq(min(dt_num), max(dt_num), length = 100))) |>
+  mutate(Date = as.Date(lubridate::date_decimal(dt_num)))
+wq_brm2 |>
+  add_epred_draws(newdata = newdata) |>
+  filter(.draw < 250) |>
+  ggplot(aes(x = Date, y = .epred, group = .draw)) +
+  geom_line(alpha = 0.1) +
+  stat_summary(
+    aes(group = 1),
+    fun = median,
+    geom = "line",
+    color = "orange",
+    linewidth = 1
+  ) +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(x = Date, y = NOx), alpha = 0.5) +
+  scale_x_date("", date_breaks = "2 years", date_labels = "%Y") +
+  ## scale_y_log10() +
+  scale_y_continuous("Estimated NOx (µM)") +
+  theme_bw()
+
+```
+
+
+:::::
+
+#### MCMC sampling diagnostics
+
+::: {.panel-tabset}
+##### stan plots
+
+```{r modelValidation2a, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm2$fit |> stan_trace()
+```
+
+```{r modelValidation2b, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm2$fit |> stan_ac()
+```
+
+```{r modelValidation2c, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm2$fit |> stan_rhat()
+```
+```{r modelValidation2d, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm2$fit |> stan_ess()
+```
+
+:::
+
+#### Model validation
+::: {.panel-tabset}
+
+##### pp check
+
+```{r modelValidation3a, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm2 |> pp_check( type='dens_overlay', ndraws=100)
+```
+
+##### DHARMa residuals
+
+```{r modelValidation3b, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=8, fig.height=10}
+
+wq_resids <- make_brms_dharma_res(wq_brm2, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq_resids)) +
+  wrap_elements(~plotResiduals(wq_resids, form = factor(rep(1, nrow(wq_sub))))) +
+  wrap_elements(~plotResiduals(wq_resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq_resids))
+```
+
+:::
+
+#### Partial effects plots
+
+
+```{r partialPlot1a, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=8, fig.height=5}
+wq_brm2 |> conditional_effects() |> plot(points = TRUE)
+wq_brm2 |>
+    conditional_effects(spaghetti = TRUE, ndraws = 250) |>
+    plot(points = TRUE)
+
+
+newdata <- with(wq_sub, tibble(dt_num = seq(min(dt_num), max(dt_num), length = 100))) |>
+  mutate(Date = as.Date(lubridate::date_decimal(dt_num)))
+# semi-manual spaghetti plot
+wq_brm2 |>
+  add_epred_draws(newdata = newdata) |>
+  filter(.draw < 250) |>
+  ggplot(aes(x = Date, y = .epred, group = .draw)) +
+  geom_line(alpha = 0.1) +
+  stat_summary(
+    aes(group = 1),
+    fun = median,
+    geom = "line",
+    color = "orange",
+    linewidth = 1
+  ) +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(x = Date, y = NOx), alpha = 0.5) +
+  scale_x_date("", date_breaks = "2 years", date_labels = "%Y") +
+  ## scale_y_log10() +
+  scale_y_log10("Estimated NOx (µM)") +
+  theme_bw()
+```
+
+
+#### Model investigation
+
+
+:::: {.panel-tabset}
+
+##### Summary
+
+```{r summariseModel1a, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=8, fig.height=5}
+wq_brm2 |> summary()
+```
+
+- sds(sx_1) is the sd of the smooth weights (spline coefficients).
+
+  - This determines the amount of ‘wiggliness’, and is analogous way
+    to how the sd of group-level effects in a varying slopes and
+    intercepts model determine the amount of variability among groups
+    in slopes and intercepts.
+  - However, the actual numeric value of the sds() is not very
+    practically interpretable, because thinking about the variance of
+    smooth weights for any given data and model seems abstract to me.
+  - However, if the value is around zero, then this is like
+    ‘complete-pooling’ of the basis functions, which means that there
+    isn’t much added value of more than a single basis function.
+
+- sx_1 is the unpenalized weight (ie coefficient) for one of the
+  “natural” parameterized basis functions.
+  - The rest of the basis functions are like varying effects.
+  - Again, because the actual numeric value of sxs_1 is the value for
+    the unpenalized coefficient for one of the basis functions.
+  - his wouldn’t seem to have a lot of practically interpretable
+    meaning just from viewing this number.
+
+##### summarise_draws
+
+```{r summariseModel1b, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=8, fig.height=5}
+wq_brm2 |> as.data.frame() |>
+  dplyr::select(matches("^b_.*|^bs.*|^sds.*|^shape$|^s_s.*")) |>
+  summarise_draws(median,
+    HDInterval::hdi)
+```
+::::
+
+#### Find the peak
+
+```{r}
+#| label: simple Date peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000)
+))
+wq_peak <-
+    add_epred_draws(
+        object = wq_brm2, newdata = newdata,
+        re_formula = NA,
+        ndraws = 1000
+    ) |>
+    ungroup() |>
+    group_by(.draw) |>
+  summarise(x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep") |>
+    ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+## wq_peak <-
+##     add_epred_draws(
+##         object = wq_brm2, newdata = newdata,
+##         re_formula = NA,
+##         ndraws = 1000
+##     ) |>
+##     ungroup() |>
+##     group_by(.draw) |>
+##   summarise(x = dt_num[which.max(.epred)],
+##     Nox = .epred[which.max(.epred)],
+##     .groups = "keep") |>
+##     ungroup() |>
+##   pivot_longer(cols = c(x, Nox), names_to = "variable", values_to = "value") |>
+##     group_by(variable) |>
+##   median_hdci(.width = 0.95) |>
+##   as.data.frame()
+## wq_peak
+```
+
+
+
+:::
+
+
+### Gaussian Process
+
+::::: {.panel-tabset}
+
+#### Priors
+
+Choosing a prior for the GP length scale:
+
+For an exponentiated-quadratic Gaussian process, the correlation
+between two observations separated by distance $d$ is:
+
+$$
+\rho(d) = \exp\left[ -\frac{1}{2} \left(\frac{d}{\ell}\right)^2 \right],
+$$
+
+where $\ell$ is the GP length scale, called `lscale` in brms.
+
+The length scale controls how quickly the fitted relationship can change:
+
+- small lscale: rapid, local variation
+- large lscale: broad, smooth variation
+
+at a distance equal to `lscale`, the correlation is approximately 0.61.
+
+When `gp(x, scale = TRUE)` is used, distances are expressed as
+proportions of the observed range of `x`. Thus, a distance of 0.2
+represents 20% of the observed predictor range.
+
+Specifying an ecologically meaningful prior:
+
+Rather than selecting inverse-gamma parameters directly, consider the
+distance at which the GP correlation becomes weak. We define weak
+correlation as:
+
+$$
+\rho_{\text{weak}}=0.1.
+$$
+
+The distance at which correlation reaches a specified value is:
+$$
+d_{\text{weak}} = \ell\sqrt{-2\log(\rho_{\text{weak}})}
+$$
+
+For $\rho_{\text{weak}}=0.1$, $d_{\text{weak}}\approx2.146\ell$,
+or equivalently, $\ell\approx\frac{d_{\text{weak}}}{2.146}$.
+
+Use `invgamma_from_weak_distance()` to specify a plausible range for $d_{\text{weak}}$. For example:
+
+```{r}
+#| label: default gp priors 1
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+invgamma_from_weak_distance(
+  lower_distance = 0.20,
+  upper_distance = 0.75,
+  weak_correlation = 0.10,
+  probability = 0.90
+)
+```
+
+This expresses the prior belief:
+
+There is 90% prior probability that GP correlation falls to 0.1 after a separation between 20% and 75% of the observed predictor range.
+
+The function converts this statement into an appropriate inverse-gamma prior for lscale.
+Meaning of the inputs
+
+- lower_distance: smallest plausible distance at which correlation becomes weak, expressed as a proportion of the observed predictor range.
+
+- upper_distance: largest plausible distance at which correlation becomes weak.
+weak_correlation: the correlation considered ecologically negligible, commonly 0.1.
+
+- probability: the prior probability assigned between the lower and upper distances, commonly 0.90.
+
+As a general guide:
+
+- smaller distances favour rapidly changing, local responses
+- larger distances favour broad, smooth responses
+- wider intervals represent greater prior uncertainty
+
+
+```{r}
+#| label: default gp priors 2
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+prior_info <- invgamma_from_weak_distance(
+  lower_distance = 0.10,
+  upper_distance = 0.5,
+  weak_correlation = 0.10,
+  probability = 0.90
+)
+
+prior_info
+```
+
+::: {.callout-note collapse="true"}
+##### Default brms priors
+```{r}
+#| label: default gp priors
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+x <- wq_sub$dt_num
+# Pairwise Euclidean distances
+dx <- as.numeric(dist(x))
+# gp(..., scale = TRUE) rescales distances so that
+# the maximum distance is one
+dx_scaled <- dx / max(dx)
+dmin <- min(dx_scaled[dx_scaled > 0])
+dmax <- max(dx_scaled)
+# Ratio that the inverse-gamma quantiles must satisfy
+target_ratio <- dmax / dmin
+shape_equation <- function(shape) {
+  qgamma(0.99, shape = shape, rate = 1) /
+    qgamma(0.01, shape = shape, rate = 1) -
+    target_ratio
+}
+alpha <- uniroot(
+  shape_equation,
+  interval = c(0.01, 1000)
+)$root
+alpha
+
+beta <- dmin * qgamma(
+  0.99,
+  shape = alpha,
+  rate = 1
+)
+beta
+```
+
+:::
+
+
+```{r}
+#| label: default gp priors old
+#| results: markup
+#| eval: false
+#| echo: false
+#| cache: true
+# Inverse-gamma quantile function using the
+# Stan/brms shape-scale parameterisation
+qinvgamma <- function(p, shape, scale) {
+  scale / qgamma(
+    1 - p,
+    shape = shape,
+    rate = 1
+  )
+}
+
+
+fit_invgamma_quantiles <- function(
+                                   lower,
+                                   upper,
+                                   probability = 0.90
+                                   ) {
+
+  stopifnot(
+    lower > 0,
+    upper > lower,
+    probability > 0,
+    probability < 1
+  )
+
+  p_lower <- (1 - probability) / 2
+  p_upper <- 1 - p_lower
+
+  # Work on log(shape) and log(scale) so that
+  # shape and scale are constrained to be positive.
+  objective <- function(log_parameters) {
+
+    shape <- exp(log_parameters[1])
+    scale <- exp(log_parameters[2])
+
+    fitted_quantiles <- qinvgamma(
+      c(p_lower, p_upper),
+      shape = shape,
+      scale = scale
+    )
+
+    # Log differences give similar importance
+    # to matching both the lower and upper limits.
+    log(fitted_quantiles) -
+      log(c(lower, upper))
+  }
+
+  fit <- optim(
+    par = log(c(shape = 5, scale = lower * 5)),
+    fn = function(par) {
+      sum(objective(par)^2)
+    },
+    method = "BFGS"
+  )
+
+  shape <- exp(fit$par[1])
+  scale <- exp(fit$par[2])
+
+  fitted_interval <- qinvgamma(
+    c(p_lower, 0.5, p_upper),
+    shape = shape,
+    scale = scale
+  )
+
+  list(
+    shape = shape,
+    scale = scale,
+    probability = probability,
+    lower_probability = p_lower,
+    upper_probability = p_upper,
+    lower = fitted_interval[1],
+    median = fitted_interval[2],
+    upper = fitted_interval[3],
+    prior = sprintf(
+      "inv_gamma(%.6f, %.6f)",
+      shape,
+      scale
+    )
+  )
+}
+
+invgamma_from_correlation_range <- function(
+                                            lower_distance,
+                                            upper_distance,
+                                            target_correlation = 0.10,
+                                            probability = 0.90
+                                            ) {
+
+  lower_lscale <-
+    lower_distance /
+    sqrt(-2 * log(target_correlation))
+
+  upper_lscale <-
+    upper_distance /
+    sqrt(-2 * log(target_correlation))
+
+  result <- fit_invgamma_quantiles(
+    lower = lower_lscale,
+    upper = upper_lscale,
+    probability = probability
+  )
+
+  result$lower_correlation_distance <- lower_distance
+  result$upper_correlation_distance <- upper_distance
+  result$target_correlation <- target_correlation
+
+  result
+}
+invgamma_from_correlation_range(
+  lower_distance = 0.1,
+  upper_distance = 0.4,
+  target_correlation = 0.10,
+  probability = 0.90
+)
+```
+
+```{r}
+#| label: priors vis
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+standist::visualize(
+  "inv_gamma(1.5, 0.05)",
+  "inv_gamma(6, 0.5)",
+  "inv_gamma(4.6, 0.4)",
+    xlim = c(0, 1)
+)
+```
+
+
+#### Fit model
+
+```{r fitModel2ab, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_form <- bf(NOx | cens(NOx_flag) ~ gp(dt_num), family = Gamma(link = "log"))
+wq_sub |> summarise(
+    median(log(NOx)), mad(log(NOx)),
+    mad(log(NOx)) / mad(scale(dt_num))
+)
+get_prior(wq_form, data = wq_sub)
+priors <- prior(normal(-3.1, 1), class = "Intercept") +
+  prior(gamma(0.01, 0.01), class = "shape") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_num") +
+  prior(student_t(3, 0, 1), class =  "sdgp")
+
+wq_brm2b <- brm(wq_form,
+                 data = wq_sub,
+                 prior = priors,
+                 sample_prior = 'only',
+                 iter = 5000,
+                 warmup = 1000,
+                 thin = 5,
+                 chains = 3, cores =  3,
+                 backend = 'cmdstan',
+                 seed =  123,
+                 control =  list(adapt_delta = 0.99, max_treedepth = 20),
+                 refresh = 0)
+```
+
+```{r fitModel2bb, results='markdown', eval=FALSE, mhidden=TRUE, error=TRUE}
+wq_brm2b |> conditional_effects() |>  plot(points=TRUE)
+wq_brm2b |> conditional_effects() |>  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10()
+```
+
+#### Sample prior and posterior
+
+```{r fitModel2cb, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_brm3b <- update(wq_brm2b, sample_prior = "yes", cores =  3, refresh =  0)
+```
+
+#### Plotting prior and posterior
+
+```{r fitModel2e, results='markdown', eval=TRUE, mhidden=TRUE, fig.width = 8, fig.height = 4, error = TRUE}
+wq_brm3b |> SUYR_prior_and_posterior()
+wq_brm3b |> get_variables()
+wq_brm3b |> hypothesis('sdgp_gpdt_num = 0', class = '') |> plot()
+wq_brm3b |> hypothesis('lscale_gpdt_num = 0', class = '') |> plot()
+```
+
+#### Conditional effects
+
+```{r fitModel2db, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm3b |> conditional_effects() |>  plot(points=TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num))
+wq_brm3b |> conditional_effects() |>  plot(points=TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num)) +
+  scale_y_log10() +
+wq_brm3b |> conditional_effects(spaghetti = TRUE, ndraws =  250) |>  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10()
+```
+
+#### MCMC sampling diagnostics
+
+::: {.panel-tabset}
+#### stan plots
+
+```{r modelValidation2ag, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm3b$fit |> stan_trace()
+```
+
+```{r modelValidation2bg, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm3b$fit |> stan_ac()
+```
+
+```{r modelValidation2cg, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm3b$fit |> stan_rhat()
+```
+```{r modelValidation2dg, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm3b$fit |> stan_ess()
+```
+
+:::
+
+#### Model validation
+::: {.panel-tabset}
+
+##### pp check
+
+```{r modelValidation3ag, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=6, fig.height=4}
+wq_brm3b |> pp_check( type='dens_overlay', ndraws=100)
+```
+
+##### DHARMa residuals
+
+```{r modelValidation3bg, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=8, fig.height=10}
+
+wq_resids <- make_brms_dharma_res(wq_brm3b, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq_resids)) +
+  wrap_elements(~plotResiduals(wq_resids, form = factor(rep(1, nrow(wq_sub))))) +
+  wrap_elements(~plotResiduals(wq_resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq_resids))
+```
+
+:::
+
+
+#### Find the peak
+
+```{r}
+#| label: simple Date GP peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000)
+))
+wq_peak <-
+    add_epred_draws(
+        object = wq_brm3b, newdata = newdata,
+        re_formula = NA,
+        ndraws = 1000
+    ) |>
+    ungroup() |>
+    group_by(.draw) |>
+  summarise(x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep") |>
+    ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::::
+:::::
+
+<!-- END_PRIVATE-->
+
+## Date conditional on season
+
+<!-- START_PRIVATE-->
+
+:::: {.panel-tabset}
+
+### GAM
+
+::: {.panel-tabset}
+
+#### Fit model
+
+```{r additionalfitModel1a, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_form <- bf(NOx | cens(NOx_flag) ~ s(scale(dt_num), by = Season),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub)
+priors <- prior(normal(-3.1, 1),  class='Intercept') +
+  prior(normal(0, 10), class='b') +
+  prior(gamma(0.01, 0.01),  class='shape') +
+  prior(student_t(3, 0, 10), class =  "sds")
+
+wq_brm4 <- brm(wq_form,
+  data = wq_sub,
+  prior = priors,
+  sample_prior = 'yes',
+  iter = 3000,
+  warmup = 1000,
+  chains = 3, cores =  3,
+  thin = 5,
+  backend = 'cmdstan',
+  seed =  123,
+  control =  list(adapt_delta =  0.99, max_treedepth = 20),
+  refresh = 0)
+```
+
+#### Partial effects plots
+
+```{r additionalfitModel1b, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm4 |> conditional_effects(effects = "dt_num:Season") |>  plot(points=TRUE)
+
+wq_brm4 |> conditional_effects(effects = "dt_num:Season") |>  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10() +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, colour = Season))
+```
+
+#### Plot prior vs posterior
+
+```{r}
+#| label: additionalFitModel1bpost_prior
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 10
+#| fig-height: 10
+wq_brm4 |> SUYR_prior_and_posterior()
+```
+
+#### DHARMa residuals
+
+```{r additionalmodelValidation1a, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=12, fig.height=5}
+wq.resids <- make_brms_dharma_res(wq_brm4, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq.resids)) +
+  ## wrap_elements(~plotResiduals(wq.resids, form = factor(rep(1, nrow(wq_sub))))) +
+  wrap_elements(~plotResiduals(wq.resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq.resids))
+
+## testTemporalAutocorrelation(wq.resids, time =  wq_sub$dt_num)
+## resids1 <- recalculateResiduals(wq.resids, group =  wq_sub$dt_num, aggregateBy =  mean)
+## testTemporalAutocorrelation(resids1, time =  wq_sub$dt_num)
+```
+
+
+```{r additionalmodelValidation1ab.resids, time =  wq_sub$dt_num}
+dt_num <- wq_brm4$data$dt_num
+## testTemporalAutocorrelation(wq.resids, time =  dt_num)
+resids1 <- recalculateResiduals(wq.resids, group =  dt_num, aggregateBy =  mean)
+testTemporalAutocorrelation(resids1, time =  dt_num)
+```
+
+
+#### Find the peak
+
+```{r}
+#| label: simple Date Season peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub, data.frame(
+    dt_num = seq(min(2010), max(2017), length = 1000)
+)) |>
+  crossing(Season = unique(wq_sub$Season))
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm4, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(Season, .draw) |>
+  summarise(x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep") |>
+  ungroup() |>
+  group_by(Season) |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+### Gaussian Process
+
+
+::::: {.panel-tabset}
+
+#### Fit model
+
+```{r}
+#| label: GP season fit
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+wq_form <- bf(NOx | cens(NOx_flag) ~ gp(dt_num, by = Season), family = Gamma(link = "log"))
+wq_sub |> summarise(
+    median(log(NOx)), mad(log(NOx)),
+    mad(log(NOx)) / mad(scale(dt_num))
+)
+get_prior(wq_form, data = wq_sub)
+priors <- prior(normal(-3.1, 1), class = "Intercept") +
+  prior(gamma(0.01, 0.01), class = "shape") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_numSeasonDry") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_numSeasonWet") +
+  prior(student_t(3, 0, 1), class =  "sdgp")
+
+wq_brm5a <- brm(wq_form,
+                 data = wq_sub,
+                 prior = priors,
+                 sample_prior = 'only',
+                 iter = 5000,
+                 warmup = 1000,
+                 thin = 5,
+                 chains = 3, cores =  3,
+                 backend = 'cmdstan',
+                 seed =  123,
+                 control =  list(adapt_delta = 0.99, max_treedepth = 20),
+                 refresh = 0)
+
+```
+
+
+```{r}
+#| label: GP season conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+wq_brm5a |> get_variables()
+wq_brm5a |> conditional_effects(effects = "dt_num:Season") |>  plot(points=TRUE)
+wq_brm5a |>
+    conditional_effects(effects = "dt_num:Season") |>
+    plot(points = TRUE) |>
+    _[[1]] +
+  scale_y_log10() +
+  geom_point(
+    data = wq_sub, inherit.aes = FALSE,
+    aes(y = NOx, x = dt_num, colour = Season)
+  )
+```
+
+#### Sample prior and posterior
+
+```{r}
+#| label: GP season fit 2
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+wq_brm5b <- update(wq_brm5a, sample_prior = "yes", cores =  3, refresh =  0)
+```
+
+#### Partial effects plot
+
+```{r}
+#| label: GP season conditional 2
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+wq_brm5b |> conditional_effects(effects = "dt_num:Season") |>  plot(points=TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, colour = Season))
+wq_brm5b |> conditional_effects(effects = "dt_num:Season") |>  plot(points=TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, colour = Season)) +
+  scale_y_log10()
+wq_brm5b |>
+    conditional_effects(
+        effects = "dt_num:Season",
+        spaghetti = TRUE, ndraws = 250
+    ) |>
+    plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, colour = Season))
+```
+
+```{r}
+#| label: GP season prior posterior
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+#| fig-width: 10
+#| fig-height: 10
+wq_brm5b |> SUYR_prior_and_posterior()
+```
+
+Might be worth making the lscale prior wider
+
+
+#### DHARMa residuals
+
+```{r}
+#| label: GP season DHARMa
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+#| fig-width: 8
+#| fig-height: 10
+wq_resids <- make_brms_dharma_res(wq_brm5b, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq_resids)) +
+  wrap_elements(~plotResiduals(wq_resids, form = factor(rep(1, nrow(wq_sub))))) +
+  wrap_elements(~plotResiduals(wq_resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq_resids))
+```
+
+#### Find the peak
+
+```{r}
+#| label: simple Date Season GP peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub, data.frame(
+    dt_num = seq(min(2010), max(2017), length = 1000)
+)) |>
+  crossing(Season = unique(wq_sub$Season))
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm5b, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(Season, .draw) |>
+  summarise(x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep") |>
+  ungroup() |>
+  group_by(Season) |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::::
+
+::::
+
+<!-- END_PRIVATE-->
+
+## Inter/Intra annual trends
+
+<!-- START_PRIVATE-->
+
+:::: {.panel-tabset}
+
+### GAM
+
+::: {.panel-tabset}
+
+#### Fit model
+
+```{r}
+#| label: S cyclic fit
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+#| fig-width: 8
+#| fig-height: 10
+wq_form <- bf(NOx | cens(NOx_flag) ~ s(scale(dt_num)) +
+                s(scale(Mnth), bs = "cc"),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub)
+priors <- prior(normal(-3.1, 1),  class='Intercept') +
+  prior(normal(0, 10), class='b') +
+  prior(gamma(0.01, 0.01),  class='shape') +
+  prior(student_t(3, 0, 10), class =  "sds")
+
+wq_brm6a <- brm(wq_form,
+  data = wq_sub,
+  prior = priors,
+  sample_prior = 'yes',
+  iter = 3000,
+  warmup = 1000,
+  chains = 3, cores =  3,
+  thin = 5,
+  backend = 'cmdstan',
+  seed =  123,
+  control =  list(adapt_delta =  0.99, max_treedepth = 20),
+  refresh = 0)
+```
+
+#### Partial effects plot
+
+```{r}
+#| label: S cyclic conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+#| fig-width: 8
+#| fig-height: 10
+wq_brm6a |>
+    conditional_effects() |>
+    plot(ask = FALSE, points = TRUE, plot = FALSE) |>
+  wrap_plots()
+
+wq_brm6a |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, colour = Season))
+wq_brm6a |> conditional_effects(effects = "Mnth") |>  plot(points=TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = Mnth))
+```
+
+#### Prior vs Posterior
+```{r}
+#| label: S cyclic posterior prior
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 10
+#| fig-height: 10
+wq_brm6a |> SUYR_prior_and_posterior()
+```
+
+#### DHARMa residuals
+
+```{r}
+#| label: S cyclic DHARMa
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 12
+#| fig-height: 5
+wq.resids <- make_brms_dharma_res(wq_brm6a, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq.resids)) +
+  ## wrap_elements(~plotResiduals(wq.resids, form = factor(rep(1, nrow(wq_sub))))) +
+  wrap_elements(~plotResiduals(wq.resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq.resids))
+
+## testTemporalAutocorrelation(wq.resids, time =  wq_sub$dt_num)
+## resids1 <- recalculateResiduals(wq.resids, group =  wq_sub$dt_num, aggregateBy =  mean)
+## testTemporalAutocorrelation(resids1, time =  wq_sub$dt_num)
+```
+
+
+```{r}
+#| label: S cyclic DHARMa ac
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 12
+#| fig-height: 5
+dt_num <- wq_brm6a$data$dt_num
+## testTemporalAutocorrelation(wq.resids, time =  dt_num)
+resids1 <- recalculateResiduals(wq.resids, group =  dt_num, aggregateBy =  mean)
+testTemporalAutocorrelation(resids1, time =  dt_num)
+```
+
+#### Find the peak
+
+```{r}
+#| label: simple Date Month peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000),
+  Mnth = 6
+))
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm6a, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(.draw) |>
+  summarise(
+    x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep"
+  ) |>
+  ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+### Gaussian Process
+
+::: {.panel-tabset}
+
+#### Fit model
+
+```{r}
+#| label: GP cyclic fit
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+#| fig-width: 8
+#| fig-height: 10
+wq_sub <- wq_sub |>
+    mutate(
+      Mnth1 = cos(2 * pi * Mnth / 12),
+      Mnth2 = sin(2 * pi * Mnth / 12)
+    )
+wq_form <- bf(NOx | cens(NOx_flag) ~ gp(dt_num) +
+                gp(Mnth1, Mnth2),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub)
+priors <- prior(normal(-3.1, 1), class = "Intercept") +
+  prior(gamma(0.01, 0.01), class = "shape") +
+  prior(inv_gamma(1.5, 0.06), class = "lscale", coef = "gpdt_num") +
+  prior(inv_gamma(12.4, 5.7), class = "lscale", coef = "gpMnth1Mnth2") +
+  prior(student_t(3, 0, 1), class = "sdgp")
+
+wq_brm7a <- brm(wq_form,
+  data = wq_sub,
+  ## prior = priors,
+  sample_prior = 'yes',
+  iter = 3000,
+  warmup = 1000,
+  chains = 3, cores =  3,
+  thin = 5,
+  backend = 'cmdstan',
+  seed =  123,
+  control =  list(adapt_delta =  0.99, max_treedepth = 20),
+  refresh = 0)
+```
+
+```{r}
+#| label: GP cyclic conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+#| fig-width: 8
+#| fig-height: 10
+wq_brm7a |>
+    conditional_effects() |>
+    plot(ask = FALSE, points = TRUE, plot = FALSE) |>
+  wrap_plots()
+
+wq_brm7a |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, colour = Season))
+
+newdata <- data.frame(Mnth = seq(1, 12, len = 100)) |>
+    mutate(
+        Mnth1 = cos(2 * pi * Mnth / 12),
+        Mnth2 = sin(2 * pi * Mnth / 12)
+    ) |>
+  crossing(dt_num = c(2006, 2015, 2024))
+# Expected response for every posterior draw
+ep <- epred_draws(
+  wq_brm7a,
+  newdata = newdata,
+  re_formula = NA
+) |>
+  ungroup() |>
+  dplyr::select(Mnth, dt_num, .epred) |>
+  group_by(Mnth, dt_num) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ep |>
+    ggplot(aes(y = median, x = Mnth)) +
+    geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3) +
+    geom_line() +
+  annotate(geom = "point", x = wq_sub$Mnth, y = wq_sub$NOx) +
+  facet_grid(~dt_num)
+```
+
+```{r}
+#| label: GP cyclic posterior prior
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 10
+#| fig-height: 10
+wq_brm7a |> SUYR_prior_and_posterior()
+```
+
+#### DHARMa residuals
+
+```{r}
+#| label: GP cyclic DHARMa
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 12
+#| fig-height: 5
+wq.resids <- make_brms_dharma_res(wq_brm7a, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq.resids)) +
+  ## wrap_elements(~plotResiduals(wq.resids, form = factor(rep(1, nrow(wq_sub))))) +
+  wrap_elements(~plotResiduals(wq.resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq.resids))
+
+## testTemporalAutocorrelation(wq.resids, time =  wq_sub$dt_num)
+## resids1 <- recalculateResiduals(wq.resids, group =  wq_sub$dt_num, aggregateBy =  mean)
+## testTemporalAutocorrelation(resids1, time =  wq_sub$dt_num)
+```
+
+
+```{r}
+#| label: GP cyclic DHARMa ac
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 12
+#| fig-height: 5
+dt_num <- wq_brm7a$data$dt_num
+## testTemporalAutocorrelation(wq.resids, time =  dt_num)
+resids1 <- recalculateResiduals(wq.resids, group =  dt_num, aggregateBy =  mean)
+testTemporalAutocorrelation(resids1, time =  dt_num)
+```
+
+#### Find the peak
+
+```{r}
+#| label: simple Date Month GP peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000),
+  Mnth = 6
+)) |>
+  mutate(
+    Mnth1 = cos(2 * pi * Mnth / 12),
+    Mnth2 = sin(2 * pi * Mnth / 12)
+  )
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm6a, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(.draw) |>
+  summarise(
+    x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep"
+  ) |>
+  ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+
+:::::
+
+<!-- END_PRIVATE-->
+# Mixed effects models (all reefs)
+
+
+<!-- START_PRIVATE-->
+::: {.panel-tabset}
+
+## Data preparation
+
+```{r process3, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=12, fig.height=12}
+ggplot(wq, aes(y=NOx,x=dt_num)) +
+    geom_point() +
+    facet_wrap(~Site, scales = 'free_y') +
+    geom_smooth() +
+    scale_y_log10()
+wq_sub2 <- wq |>
+  group_by(Site) |>
+  mutate(Min=min(dt_num)) |>
+  ungroup() |>
+  filter(Min<2012, Region != 'Fitzroy', reef.alias != 'Daydream') |>
+  droplevels()
+
+```
+
+## EDA
+
+```{r EDA2, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=12, fig.height=12}
+ggplot(wq_sub2, aes(y=NOx,x=dt_num)) +
+    geom_point() +
+    facet_wrap(~Site, scales = 'free_y') +
+    geom_smooth() +
+    scale_y_log10()
+```
+
+
+## Date model
+
+::: {.panel-tabset}
+### GAM
+
+::: {.panel-tabset}
+
+#### Fit model (priors only)
+
+```{r additionalfitModel8a, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_form <- bf(NOx | cens(NOx_flag) ~ s(scale(dt_num)) + (1|reef.alias),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub2)
+priors <- prior(normal(-3.1, 1),  class='Intercept') +
+  prior(normal(0, 10), class='b') +
+  prior(gamma(0.01, 0.01),  class='shape') +
+  prior(student_t(3, 0, 10), class =  "sds") +
+  prior(student_t(3, 0, 1), class =  "sd")
+
+wq_brm8 <- brm(wq_form,
+                 data = wq_sub2,
+                 prior = priors,
+                 sample_prior = 'only',
+                 iter = 5000,
+                 warmup = 1000,
+                 chains = 3, cores =  3,
+                 thin = 5,
+                 backend = 'cmdstanr',
+                 seed =  123,
+                 control =  list(adapt_delta =  0.99, max_treedepth = 20),
+                 refresh = 0)
+```
+
+```{r additionalfitModel8b, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm8 |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE)
+wq_brm8 |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE) |>
+  _[[1]] +
+  scale_y_log10()
+```
+
+#### Sample prior and posterior
+
+The following takes about x seconds per chain
+```{r additionalfitModel8c, results='markdown', eval=TRUE, mhidden=TRUE, cache=TRUE}
+wq_brm9 <- update(wq_brm8, sample_prior = "yes", cores =  3, seed = 123, refresh =  0)
+```
+
+#### Conditional effects plot
+
+```{r additionalfitModel8d, results='markdown', eval=TRUE, mhidden=TRUE}
+wq_brm9 |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE)
+wq_brm9 |> conditional_effects(effects = "dt_num")
+
+wq_brm9 |>
+    conditional_effects(effects = "dt_num") |>
+    plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub2, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num), alpha = 0.5)
+```
+
+#### Plotting prior and posterior
+
+```{r additionalfitModel8e, results='markdown', eval=TRUE, mhidden=TRUE, fig.width = 8, fig.height = 4, error = TRUE}
+wq_brm9 |> SUYR_prior_and_posterior()
+```
+
+#### DHARMa residuals
+
+```{r additionalmodelValidation8a, results='markdown', eval=TRUE, mhidden=TRUE, fig.width=8, fig.height=10}
+wq_resids <- make_brms_dharma_res(wq_brm9, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq_resids)) +
+  wrap_elements(~plotResiduals(wq_resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq_resids)) +
+  plot_layout(nrow =  2)
+```
+
+#### Find the peak
+
+```{r}
+#| label: mixed Date peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub2, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000)
+))
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm9, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(.draw) |>
+  summarise(
+    x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep"
+  ) |>
+  ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+### Gaussian Process
+
+::: {.panel-tabset}
+
+#### Fit model
+
+**Warning** if exact GPs are to be computed, this models will take a
+long time.  A faster version can be obtained by computing
+Hilbert-space approximate GPs by indicating the number of basis
+functions to be (e.g.) 20.
+
+```{r}
+#| label: GP date full fit
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+wq_form <- bf(NOx | cens(NOx_flag) ~ gp(dt_num, k = 20, c = 5/4) + (1 | reef.alias),
+  family = Gamma(link = "log")
+)
+wq_sub2 |> summarise(
+    median(log(NOx), na.rm = TRUE), mad(log(NOx), na.rm = TRUE),
+    mad(log(NOx)) / mad(scale(dt_num))
+)
+get_prior(wq_form, data = wq_sub2)
+priors <- prior(normal(-3.1, 1), class = "Intercept") +
+  prior(gamma(0.01, 0.01), class = "shape") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_num") +
+  prior(student_t(3, 0, 1), class =  "sdgp")
+
+wq_brm10a <- brm(wq_form,
+                 data = wq_sub2,
+                 prior = priors,
+                 sample_prior = 'yes',
+                 iter = 3000,
+                 warmup = 1000,
+                 thin = 5,
+                 chains = 3, cores =  3,
+                 backend = 'cmdstan',
+                 seed =  123,
+                 control =  list(adapt_delta = 0.99, max_treedepth = 20),
+                 refresh = 0)
+```
+
+#### Conditional effects plot
+
+```{r}
+#| label: GP date full conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| mhidden: true
+wq_brm10a |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE)
+wq_brm10a |>
+    conditional_effects(effects = "dt_num") |>
+    plot(points = TRUE) |>
+    _[[1]] +
+  scale_y_log10() +
+  geom_point(
+    data = wq_sub2, inherit.aes = FALSE,
+    aes(y = NOx, x = dt_num)
+  )
+
+```
+
+#### Find the peak
+
+```{r}
+#| label: mixed Date GP peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub2, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000)
+))
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm10a, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(.draw) |>
+  summarise(
+    x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep"
+  ) |>
+  ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+:::
+:::
+
+## Date and month model
+
+::: {.panel-tabset}
+
+### GAM
+
+::: {.panel-tabset}
+
+#### Fit model (priors only)
+
+```{r}
+#| label: date and month model RE fit priors
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_form <- bf(NOx | cens(NOx_flag) ~ s(scale(dt_num)) +
+                s(scale(Mnth), bs = "cc") +
+                (1|reef.alias),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub2)
+priors <- prior(normal(-3.1, 1),  class='Intercept') +
+  prior(normal(0, 10), class='b') +
+  prior(gamma(0.01, 0.01),  class='shape') +
+  prior(student_t(3, 0, 10), class =  "sds") +
+  prior(student_t(3, 0, 1), class =  "sd")
+
+wq_brm11a <- brm(wq_form,
+                 data = wq_sub2,
+                 prior = priors,
+                 sample_prior = 'only',
+                 iter = 5000,
+                 warmup = 1000,
+                 chains = 3, cores =  3,
+                 thin = 5,
+                 backend = 'cmdstanr',
+                 seed =  123,
+                 control =  list(adapt_delta =  0.99, max_treedepth = 20),
+                 refresh = 0)
+
+```
+
+```{r}
+#| label: date and month model RE fit priors conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_brm11a |>
+    conditional_effects(effects = "dt_num") |>
+    plot(points = TRUE) |>
+    _[[1]] +
+    scale_y_log10() +
+    geom_point(
+        data = wq_sub2, inherit.aes = FALSE,
+        aes(y = NOx, x = dt_num)
+    )
+```
+
+#### Sample prior and posterior
+
+The following takes about x seconds per chain
+```{r}
+#| label: date and month model RE fit
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_brm11b <- update(wq_brm11a, sample_prior = "yes", cores =  3, seed = 123, refresh =  0)
+```
+
+#### Conditional effects plot
+
+```{r}
+#| label: date and month model RE fit conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_brm11b |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE)
+wq_brm11b |> conditional_effects(effects = "dt_num")
+
+wq_brm11b |>
+    conditional_effects(effects = "dt_num") |>
+    plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub2, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num), alpha = 0.5)
+
+wq_brm11b |>
+  conditional_effects(effects = "Mnth") |>
+  plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(
+    data = wq_sub2, inherit.aes = FALSE,
+    aes(y = NOx, x = Mnth)
+  )
+```
+
+#### Plotting prior and posterior
+
+```{r}
+#| label: date and month model RE prior posterior
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| fig-width: 8
+#| fig-height: 4
+wq_brm11b |> SUYR_prior_and_posterior()
+```
+
+
+#### DHARMa residuals
+
+```{r}
+#| label: date and month model RE DHARMa
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| fig-width: 12
+#| fig-height: 5
+wq_resids <- make_brms_dharma_res(wq_brm11b, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq_resids)) +
+  wrap_elements(~plotResiduals(wq_resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq_resids))
+```
+
+#### Find the peak
+
+```{r}
+#| label: mixed date and month peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub2, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000),
+  Mnth = 6
+))
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm11b, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(.draw) |>
+  summarise(
+    x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep"
+  ) |>
+  ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+### Gaussian Process
+
+::: {.panel-tabset}
+
+#### Fit model
+
+```{r}
+#| label: date and month model RE fit GP
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_sub2 <- wq_sub2 |>
+  mutate(
+    Mnth1 = cos(2 * pi * Mnth / 12),
+    Mnth2 = sin(2 * pi * Mnth / 12)
+  )
+wq_form <- bf(NOx | cens(NOx_flag) ~ gp(dt_num, k = 20, c = 5/4) +
+                gp(Mnth1, Mnth2, k = 20, c = 5/4) +
+                (1|reef.alias),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub2)
+priors <- prior(normal(-3.1, 1), class = "Intercept") +
+  prior(gamma(0.01, 0.01), class = "shape") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_num") +
+  prior(student_t(3, 0, 1), class = "sdgp") +
+  prior(student_t(3, 0, 1), class =  "sd")
+
+wq_brm12b <- brm(wq_form,
+                 data = wq_sub2,
+                 prior = priors,
+                 sample_prior = 'yes',
+                 iter = 5000,
+                 warmup = 1000,
+                 chains = 3, cores =  3,
+                 thin = 5,
+                 backend = 'cmdstanr',
+                 seed =  123,
+                 control =  list(adapt_delta =  0.99, max_treedepth = 20),
+                 refresh = 0)
+
+```
+
+#### Conditional effects plot
+
+```{r}
+#| label: date and month model RE GP fit conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+wq_brm12b |> conditional_effects(effects = "dt_num") |>  plot(points=TRUE)
+wq_brm12b |> conditional_effects(effects = "dt_num")
+
+wq_brm12b |>
+    conditional_effects(effects = "dt_num") |>
+    plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub2, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num), alpha = 0.5)
+
+```
+
+#### Plotting prior and posterior
+
+```{r}
+#| label: date and month model RE GP prior posterior
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| fig-width: 8
+#| fig-height: 4
+wq_brm12b |> SUYR_prior_and_posterior()
+```
+
+
+#### DHARMa residuals
+
+```{r}
+#| label: date and month model RE GP DHARMa
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| fig-width: 12
+#| fig-height: 5
+wq_resids <- make_brms_dharma_res(wq_brm12b, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq_resids)) +
+  wrap_elements(~plotResiduals(wq_resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq_resids))
+```
+
+#### Find the peak
+
+```{r}
+#| label: mixed date and month GP peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub2, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000),
+  Mnth = 6
+)) |>
+  mutate(
+    Mnth1 = cos(2 * pi * Mnth / 12),
+    Mnth2 = sin(2 * pi * Mnth / 12)
+  )
+wq_peak <-
+  add_epred_draws(
+    object = wq_brm12b, newdata = newdata,
+    re_formula = NA,
+    ndraws = 1000
+  ) |>
+  ungroup() |>
+  group_by(.draw) |>
+  summarise(
+    x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep"
+  ) |>
+  ungroup() |>
+  median_hdci(.width = 0.95) |>
+  mutate(across(matches("^x"), lubridate::date_decimal)) |>
+  mutate(across(matches("^x"), as.Date)) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+:::
+
+## Date and month model | Region
+
+::: {.panel-tabset}
+
+### GAM
+
+::: {.panel-tabset}
+
+#### Fit model (priors only)
+
+```{r}
+#| label: date and month model RE Region fit priors
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_form <- bf(NOx | cens(NOx_flag) ~ s(scale(dt_num), by = Region) +
+                s(scale(Mnth), by = Region, bs = "cc") +
+                (1|reef.alias),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub2)
+priors <- prior(normal(-3.1, 1),  class='Intercept') +
+  prior(normal(0, 10), class='b') +
+  prior(gamma(0.01, 0.01),  class='shape') +
+  prior(student_t(3, 0, 10), class =  "sds") +
+  prior(student_t(3, 0, 1), class =  "sd")
+
+wq_brm13a <- brm(wq_form,
+                 data = wq_sub2,
+                 prior = priors,
+                 sample_prior = 'only',
+                 iter = 5000,
+                 warmup = 1000,
+                 chains = 3, cores =  3,
+                 thin = 5,
+                 backend = 'cmdstanr',
+                 seed =  123,
+                 control =  list(adapt_delta =  0.99, max_treedepth = 20),
+                 refresh = 0)
+
+```
+
+```{r}
+#| label: date and month model RE Region fit priors conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_brm13a |>
+    conditional_effects(effects = "dt_num") |>
+    plot(points = TRUE) |>
+    _[[1]] +
+    scale_y_log10() +
+    geom_point(
+        data = wq_sub2, inherit.aes = FALSE,
+        aes(y = NOx, x = dt_num)
+    )
+```
+
+#### Sample prior and posterior
+
+The following takes about x seconds per chain
+```{r}
+#| label: date and month model RE Region fit
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_brm13b <- update(wq_brm13a, sample_prior = "yes", cores =  3, seed = 123, refresh =  0)
+```
+
+#### Conditional effects plot
+
+```{r}
+#| label: date and month model RE Region fit conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| fig-width: 8
+#| fig-height: 5
+wq_brm13b |> conditional_effects(effects = "dt_num:Region") |>  plot(points=TRUE)
+wq_brm13b |> conditional_effects(effects = "dt_num:Region")
+
+wq_brm13b |>
+    conditional_effects(effects = "dt_num:Region") |>
+    plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub2, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, color = Region), alpha = 0.5)
+
+wq_brm13b |>
+  conditional_effects(effects = "Mnth:Region") |>
+  plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(
+    data = wq_sub2, inherit.aes = FALSE,
+    aes(y = NOx, x = Mnth, color = Region)
+  )
+```
+
+#### Plotting prior and posterior
+
+```{r}
+#| label: date and month model RE Region prior posterior
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| fig-width: 8
+#| fig-height: 4
+wq_brm13b |> SUYR_prior_and_posterior()
+```
+
+#### DHARMa residuals
+
+```{r}
+#| label: date and month model RE Region DHARMa
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+#| fig-width: 12
+#| fig-height: 5
+wq_resids <- make_brms_dharma_res(wq_brm13b, integerResponse = FALSE)
+wrap_elements(~testUniformity(wq_resids)) +
+  wrap_elements(~plotResiduals(wq_resids, quantreg = TRUE)) +
+  wrap_elements(~testDispersion(wq_resids))
+```
+
+#### Find the peak
+
+```{r}
+#| label: mixed date and month Region peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub2, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000),
+  Mnth = 6
+)) |>
+  crossing(Region = unique(wq_sub2$Region))
+wq_peak <-
+    add_epred_draws(
+        object = wq_brm13b, newdata = newdata,
+        re_formula = NA,
+        ndraws = 1000
+    ) |>
+    ungroup() |>
+    group_by(Region, .draw) |>
+  summarise(x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep") |>
+    ungroup() |>
+  pivot_longer(cols = c(x, Nox), names_to = "variable", values_to = "value") |>
+    group_by(Region, variable) |>
+  median_hdci(.width = 0.95) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+### Gaussian Process
+
+::: {.panel-tabset}
+
+#### Fit model
+
+```{r}
+#| label: date and month model RE Region fit GP
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+wq_sub2 <- wq_sub2 |>
+  mutate(
+    Mnth1 = cos(2 * pi * Mnth / 12),
+    Mnth2 = sin(2 * pi * Mnth / 12)
+  )
+wq_form <- bf(NOx | cens(NOx_flag) ~ gp(dt_num, by = Region, k = 20, c = 5/4) +
+                ## gp(Mnth1, Mnth2, by = Region, k = 20, c = 5/4) +
+                gp(Mnth1, Mnth2, k = 20, c = 5/4) +
+                (1|reef.alias),
+  family = Gamma(link = "log"))
+get_prior(wq_form, data = wq_sub2)
+priors <- prior(normal(-3.1, 1), class = "Intercept") +
+  prior(gamma(0.01, 0.01), class = "shape") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_numRegionBurdekin") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_numRegionMackayWhitsunday") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpdt_numRegionWetTropics") +
+  prior(inv_gamma(4.6, 0.4), class = "lscale", coef = "gpMnth1Mnth2") +
+  prior(student_t(3, 0, 1), class = "sdgp") +
+  prior(student_t(3, 0, 1), class =  "sd")
+
+wq_brm14b <- brm(wq_form,
+                 data = wq_sub2,
+                 prior = priors,
+                 sample_prior = 'yes',
+                 iter = 5000,
+                 warmup = 1000,
+                 chains = 3, cores =  3,
+                 thin = 5,
+                 backend = 'cmdstanr',
+                 seed =  123,
+                 control =  list(adapt_delta =  0.99, max_treedepth = 20),
+                 refresh = 100)
+
+```
+
+#### Conditional effects plot
+
+```{r}
+#| label: date and month model RE GP Region fit conditional
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: false
+#| fig-width: 8
+#| fig-height: 5
+wq_brm14b |> conditional_effects(effects = "dt_num:Region") |>  plot(points=TRUE)
+wq_brm14b |> conditional_effects(effects = "dt_num:Region")
+
+wq_brm14b |>
+    conditional_effects(effects = "dt_num:Region") |>
+    plot(points = TRUE) |>
+  _[[1]] +
+  geom_point(data = wq_sub2, inherit.aes = FALSE,
+             aes(y = NOx, x = dt_num, color = Region), alpha = 0.5)
+
+
+newdata <- data.frame(Mnth = 6) |>
+    mutate(
+        Mnth1 = cos(2 * pi * Mnth / 12),
+        Mnth2 = sin(2 * pi * Mnth / 12)
+    ) |>
+    crossing(
+        dt_num = seq(2006, 2024, len = 100),
+        Region = unique(wq_sub2$Region)
+    )
+# Expected response for every posterior draw
+ep <- epred_draws(
+  wq_brm14b,
+  newdata = newdata,
+  re_formula = NA
+) |>
+  ungroup() |>
+  dplyr::select(Mnth, Region, dt_num, .epred) |>
+  group_by(Region, Mnth, dt_num) |>
+  summarise_draws(median, HDInterval::hdi)
+
+ep |>
+  ggplot(aes(y = median, x = dt_num)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3) +
+  geom_line() +
+  geom_point(data = wq_sub2, aes(y = NOx)) +
+  ## annotate(geom = "point", x = wq_sub2$dt_num, y = wq_sub2$NOx) +
+  facet_grid(~Region)
+
+
+```
+
+#### Find the peak
+
+```{r}
+#| label: mixed date and month Region GP peak
+#| results: markup
+#| eval: true
+#| echo: true
+#| cache: true
+newdata <- with(wq_sub2, data.frame(
+  dt_num = seq(min(2010), max(2017), length = 1000),
+  Mnth = 6
+))  |>
+  mutate(
+    Mnth1 = cos(2 * pi * Mnth / 12),
+    Mnth2 = sin(2 * pi * Mnth / 12)
+  ) |>
+  crossing(Region = unique(wq_sub2$Region))
+wq_peak <-
+    add_epred_draws(
+        object = wq_brm14b, newdata = newdata,
+        re_formula = NA,
+        ndraws = 1000
+    ) |>
+    ungroup() |>
+    group_by(Region, .draw) |>
+  summarise(x = dt_num[which.max(.epred)],
+    Nox = .epred[which.max(.epred)],
+    .groups = "keep") |>
+    ungroup() |>
+  pivot_longer(cols = c(x, Nox), names_to = "variable", values_to = "value") |>
+    group_by(Region, variable) |>
+  median_hdci(.width = 0.95) |>
+  as.data.frame()
+wq_peak
+```
+
+:::
+
+:::
+
+:::
+
+
+<!-- END_PRIVATE-->
+
+# References
