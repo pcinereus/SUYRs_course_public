@@ -1412,6 +1412,7 @@ wq_brm5a <- brm(wq_form,
 #| echo: true
 #| cache: true
 #| mhidden: true
+#| error: true
 wq_brm5a |> get_variables()
 wq_brm5a |> conditional_effects(effects = "dt_num:Season") |>  plot(points=TRUE)
 wq_brm5a |>
